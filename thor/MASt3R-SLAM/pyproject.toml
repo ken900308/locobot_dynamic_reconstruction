@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools==70.0.0", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "MAST3R-SLAM"
+version = "0.0.1"
+dependencies = [
+    "numpy>=1.21,<1.25; python_version < '3.12'",
+    "numpy>=1.26,<2; python_version >= '3.12'",
+    "einops",
+    # "pyrealsense2",  # No ARM64 wheel, use librealsense2 from apt instead
+    "evo",
+    "natsort",
+    # "torchcodec==0.1",
+    "lietorch @ git+https://github.com/princeton-vl/lietorch.git",
+    "plyfile",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mast3r_slam"]
+namespaces = false

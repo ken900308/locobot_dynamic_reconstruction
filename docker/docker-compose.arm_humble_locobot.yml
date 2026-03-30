@@ -1,0 +1,76 @@
+#############################
+###    shared settings    ###
+#############################
+x-common-settings: &common
+  build:
+    context: ..
+    dockerfile: docker/dockerfile.arm_humble_locobot
+  image: mast3r-ros-locobot:arm64-humble
+
+  volumes:
+    # GUI support
+    - $HOME/.Xauthority:/root/.Xauthority:ro
+    - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    - /etc/localtime:/etc/localtime:ro
+
+    # IPC socket for GPU communication
+    - /tmp/ipc_socket_locobot:/tmp/ipc_socket:rw
+
+    # Mount entire project directory
+    - /home/hrc/Desktop/projects/locobot:/workspace:rw
+
+    # udev rules for RealSense
+    - /etc/udev/rules.d:/etc/udev/rules.d:ro
+    - /run/udev:/run/udev:ro
+
+    # Device access
+    - "/dev:/dev"
+    - "/dev/shm:/dev/shm"
+
+  environment:
+    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    - DISPLAY=${DISPLAY}
+    - XAUTHORITY=/root/.Xauthority
+    - QT_X11_NO_MITSHM=1
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+    - PS1=\[\e[1;34m\][ROS-Humble-locobot]\[\e[0m\] \w #
+
+  # Network mode for SSH X11 forwarding
+  network_mode: host
+  ipc: host
+
+  # Container settings
+  tty: true
+  stdin_open: true
+  privileged: true
+  stop_grace_period: 1s
+  working_dir: /workspace/thor
+
+############################
+###   GPU settings       ###
+############################
+x-gpu-settings: &gpu
+  runtime: nvidia
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [ gpu ]
+
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+    - CUDA_VISIBLE_DEVICES=all
+
+##############################
+###   Container Services   ###
+##############################
+services:
+  mast3r_locobot_ros_humble:
+    <<: [ *common, *gpu ]
+    container_name: mast3r_locobot_ros_humble
+    shm_size: "4g"
+    command: [ "/bin/bash" ]

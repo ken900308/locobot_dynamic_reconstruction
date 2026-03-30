@@ -1,0 +1,87 @@
+#############################
+###    shared settings    ###
+#############################
+x-common-settings: &common
+  build:
+    context: ..
+    dockerfile: docker/dockerfile.arm_algorithm_locobot
+  image: mast3r-slam-locobot:arm64-thor
+
+  volumes:
+    # GUI support
+    - $HOME/.Xauthority:/root/.Xauthority:ro
+    - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    - /etc/localtime:/etc/localtime:ro
+
+    # IPC socket for GPU communication
+    - /tmp/ipc_socket_locobot:/tmp/ipc_socket:rw
+
+    # checkpoints / datasets / logs
+    # - ../MASt3R-SLAM/checkpoints:/workspace/MASt3R-SLAM/checkpoints:ro
+
+    # # Enhanced MASt3R-SLAM files - automatically sync changes
+    # - ../MASt3R-SLAM/resources/programs/lines.glsl:/workspace/MASt3R-SLAM/resources/programs/lines.glsl:ro
+    # - ../MASt3R-SLAM:/workspace/MASt3R-SLAM:rw
+
+    # # Mount ros_node_for_stretch3
+    # - ../ros_node_for_stretch3:/workspace/ros_node_for_stretch3:rw
+    # - ../environment.sh:/workspace/environment.sh:rw
+
+    # Mount entire project directory
+    - /home/hrc/Desktop/projects/locobot:/workspace:rw
+
+    # udev rules for RealSense
+    - /etc/udev/rules.d:/etc/udev/rules.d:ro
+    - /run/udev:/run/udev:ro
+
+    # Device access
+    - "/dev:/dev"
+    - "/dev/shm:/dev/shm"
+
+  environment:
+    # - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+    - DISPLAY=${DISPLAY}
+    - XAUTHORITY=/root/.Xauthority
+    - QT_X11_NO_MITSHM=1
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+    - PS1=\[\e[1;32m\][GPU-Thor-locobot]\[\e[0m\] \w #
+
+  # Network mode for SSH X11 forwarding
+  network_mode: host
+  ipc: host
+
+  # Container settings
+  tty: true
+  stdin_open: true
+  privileged: true
+  stop_grace_period: 1s
+  working_dir: /workspace/thor/MASt3R-SLAM
+
+############################
+###   GPU settings       ###
+############################
+x-gpu-settings: &gpu
+  runtime: nvidia
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [ gpu ]
+
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+    - CUDA_VISIBLE_DEVICES=all
+
+##############################
+###   Container Services   ###
+##############################
+services:
+  mast3r_locobot_algorithm:
+    <<: [ *common, *gpu ]
+    container_name: mast3r_locobot_algorithm
+    shm_size: "4g"
+    command: [ "/bin/bash" ]

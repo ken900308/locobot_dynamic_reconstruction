@@ -1,0 +1,196 @@
+
+# ===== MONKEY PATCH FOR AGX THOR GPU =====
+import sys
+import os
+
+# Force CUDA arch list BEFORE any torch imports
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+# Monkey patch torch.cuda.get_device_capability to return 9.0 instead of 11.0
+def patch_torch_cuda():
+    import torch.cuda
+    original_get_device_capability = torch.cuda.get_device_capability
+    
+    def patched_get_device_capability(device=None):
+        # Return compute capability 9.0 (Hopper) instead of 11.0 (Thor)
+        # This is supported by PyTorch 2.2
+        return (9, 0)
+    
+    torch.cuda.get_device_capability = patched_get_device_capability
+    print("✓ Patched torch.cuda.get_device_capability to return (9, 0)")
+
+# Apply patch immediately after torch is imported
+import torch
+patch_torch_cuda()
+# ===== END MONKEY PATCH =====
+
+
+
+# ===== MONKEY PATCH FOR AGX THOR GPU =====
+import sys
+import os
+
+# Force CUDA arch list BEFORE any torch imports
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+# Monkey patch torch.cuda.get_device_capability to return 9.0 instead of 11.0
+def patch_torch_cuda():
+    import torch.cuda
+    original_get_device_capability = torch.cuda.get_device_capability
+    
+    def patched_get_device_capability(device=None):
+        # Return compute capability 9.0 (Hopper) instead of 11.0 (Thor)
+        # This is supported by PyTorch 2.2
+        return (9, 0)
+    
+    torch.cuda.get_device_capability = patched_get_device_capability
+    print("✓ Patched torch.cuda.get_device_capability to return (9, 0)")
+
+# Apply patch immediately after torch is imported
+import torch
+patch_torch_cuda()
+# ===== END MONKEY PATCH =====
+
+
+
+# ===== MONKEY PATCH FOR AGX THOR GPU =====
+import sys
+import os
+
+# Force CUDA arch list BEFORE any torch imports
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+# Monkey patch torch.cuda.get_device_capability to return 9.0 instead of 11.0
+def patch_torch_cuda():
+    import torch.cuda
+    original_get_device_capability = torch.cuda.get_device_capability
+    
+    def patched_get_device_capability(device=None):
+        # Return compute capability 9.0 (Hopper) instead of 11.0 (Thor)
+        # This is supported by PyTorch 2.2
+        return (9, 0)
+    
+    torch.cuda.get_device_capability = patched_get_device_capability
+    print("✓ Patched torch.cuda.get_device_capability to return (9, 0)")
+
+# Apply patch immediately after torch is imported
+import torch
+patch_torch_cuda()
+# ===== END MONKEY PATCH =====
+
+
+
+# ===== MONKEY PATCH FOR AGX THOR GPU =====
+import sys
+import os
+
+# Force CUDA arch list BEFORE any torch imports
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+# Monkey patch torch.cuda.get_device_capability to return 9.0 instead of 11.0
+def patch_torch_cuda():
+    import torch.cuda
+    original_get_device_capability = torch.cuda.get_device_capability
+    
+    def patched_get_device_capability(device=None):
+        # Return compute capability 9.0 (Hopper) instead of 11.0 (Thor)
+        # This is supported by PyTorch 2.2
+        return (9, 0)
+    
+    torch.cuda.get_device_capability = patched_get_device_capability
+    print("✓ Patched torch.cuda.get_device_capability to return (9, 0)")
+
+# Apply patch immediately after torch is imported
+import torch
+patch_torch_cuda()
+# ===== END MONKEY PATCH =====
+
+
+
+# ===== MONKEY PATCH FOR AGX THOR GPU =====
+import sys
+import os
+
+# Force CUDA arch list BEFORE any torch imports
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+# Monkey patch torch.cuda.get_device_capability to return 9.0 instead of 11.0
+def patch_torch_cuda():
+    import torch.cuda
+    original_get_device_capability = torch.cuda.get_device_capability
+    
+    def patched_get_device_capability(device=None):
+        # Return compute capability 9.0 (Hopper) instead of 11.0 (Thor)
+        # This is supported by PyTorch 2.2
+        return (9, 0)
+    
+    torch.cuda.get_device_capability = patched_get_device_capability
+    print("✓ Patched torch.cuda.get_device_capability to return (9, 0)")
+
+# Apply patch immediately after torch is imported
+import torch
+patch_torch_cuda()
+# ===== END MONKEY PATCH =====
+
+
+import os
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+import os
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+import os
+os.environ['TORCH_CUDA_ARCH_LIST'] = '8.0;8.6;8.9;9.0'
+
+import os
+os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0;8.6;8.9;9.0"
+from pathlib import Path
+from setuptools import setup
+
+import torch
+from torch.utils.cpp_extension import BuildExtension, CppExtension
+import os
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+has_cuda = torch.cuda.is_available()
+
+include_dirs = [
+    os.path.join(ROOT, "mast3r_slam/backend/include"),
+    os.path.join(ROOT, "thirdparty/eigen"),
+]
+
+sources = [
+    "mast3r_slam/backend/src/gn.cpp",
+]
+extra_compile_args = {
+    "cores": ["j8"],
+    "cxx": ["-O3"],
+}
+
+if has_cuda:
+    from torch.utils.cpp_extension import CUDAExtension
+
+    sources.append("mast3r_slam/backend/src/gn_kernels.cu")
+    sources.append("mast3r_slam/backend/src/matching_kernels.cu")
+    extra_compile_args["nvcc"] = [
+        "-O3",
+        # Thor GPU uses SM 11.0 (compute_110), NOT SM 10.0!
+        # Verified via torch.cuda.get_device_capability() = (11, 0)
+        "-gencode=arch=compute_110,code=sm_110",
+    ]
+
+    ext_modules = [
+        CUDAExtension(
+            "mast3r_slam_backends",
+            include_dirs=include_dirs,
+            sources=sources,
+            extra_compile_args=extra_compile_args,
+        )
+    ]
+else:
+    print("CUDA not found, cannot compile backend!")
+
+setup(
+    ext_modules=ext_modules,
+    cmdclass={"build_ext": BuildExtension},
+)

@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>stretch3_ros_nodes</name>
+  <version>0.0.1</version>
+  <description>Stretch3 ROS2 nodes (IPC bridge, auto anchor, pc2 to map)</description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>opencv</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>numpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
