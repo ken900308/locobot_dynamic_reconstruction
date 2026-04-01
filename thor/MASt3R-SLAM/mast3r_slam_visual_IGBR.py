@@ -427,9 +427,9 @@ class MASt3RSLAMVisualizationNode(Node):
         self.bridge = CvBridge() if self.ros_enabled else None
 
         # IPC socket path (IPC-only)
-        self.ipc_socket_path = os.environ.get('IPC_SOCKET', '/tmp/ipc_socket/mast3r_image.sock')
+        self.ipc_socket_path = os.environ.get('IPC_SOCKET', '/tmp/ipc_socket/locobot/mast3r_image.sock')
         self.ipc_receiver = None
-        self.ipc_pointcloud_socket = os.environ.get('IPC_POINTCLOUD_SOCKET', '/tmp/ipc_socket/mast3r_pointcloud.sock')
+        self.ipc_pointcloud_socket = os.environ.get('IPC_POINTCLOUD_SOCKET', '/tmp/ipc_socket/locobot/mast3r_pointcloud.sock')
         self.ipc_pointcloud_sender = None
         
         # 改進 1: 使用短 FIFO (deque) 取代深 queue

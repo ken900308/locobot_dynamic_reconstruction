@@ -124,7 +124,7 @@ class Pc2ToMap(Node):
         self.declare_parameter('world_frame', 'locobot/odom')
         self.declare_parameter('lookup_timeout_sec', 0.5)
         self.declare_parameter('qos_best_effort', False)  # 使用 RELIABLE QoS
-        self.declare_parameter('max_publish_rate', 10.0)  # 新增：限制最大發布頻率 (Hz)
+        self.declare_parameter('max_publish_rate', 0.0)   # 0 = 無限制 (disabled)
         self.declare_parameter('wait_for_tf_at_startup', True)  # 新增：啟動時等待 TF 可用
         self.input_topic = self.get_parameter('input_topic').value
         self.output_topic = self.get_parameter('output_topic').value
@@ -150,7 +150,7 @@ class Pc2ToMap(Node):
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1  # 改為 1，避免累積延遲
+            depth=50  # 提高 depth 避免 chunk burst 時掉包
         )
         self.sub = self.create_subscription(PointCloud2, self.input_topic, self.on_cloud, qos)
         self.pub = self.create_publisher(PointCloud2, self.output_topic, qos)

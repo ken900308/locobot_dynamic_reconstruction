@@ -7,7 +7,7 @@ echo "========================================================"
 
 # Default arguments
 ENABLE_VIZ=${ENABLE_VIZ:-false}
-IPC_SOCKET=${IPC_SOCKET:-/tmp/ipc_socket/mast3r_image.sock}
+IPC_SOCKET=${IPC_SOCKET:-/tmp/ipc_socket/locobot/mast3r_image.sock}
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
