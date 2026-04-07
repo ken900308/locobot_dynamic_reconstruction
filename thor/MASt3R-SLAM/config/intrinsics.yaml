@@ -1,7 +1,9 @@
 width: 640
 height: 480
-# With distortion (fx, fy, cx, cy, k1, k2, p1, p2)
-calibration:  [517.3, 516.5, 318.6, 255.3, 0.2624, -0.9531, -0.0054, 0.0026, 1.1633]
-
+# Locobot D435 camera intrinsics from /locobot/camera/camera/color/camera_info
+# distortion_model: plumb_bob, all D coefficients are 0.0 (no distortion)
 # Without distortion (fx, fy, cx, cy)
-# calibration:  [517.3, 516.5, 318.6, 255.3]
+calibration: [603.12060546875, 602.8582153320312, 334.1749267578125, 251.37127685546875]
+
+# With distortion (fx, fy, cx, cy, k1, k2, p1, p2) — not needed for this camera
+# calibration: [603.12060546875, 602.8582153320312, 334.1749267578125, 251.37127685546875, 0.0, 0.0, 0.0, 0.0]

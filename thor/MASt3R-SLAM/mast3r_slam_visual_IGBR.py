@@ -775,8 +775,13 @@ class MASt3RSLAMVisualizationNode(Node):
                 
             # Set up camera intrinsics
             self.raw_h, self.raw_w = 480, 640  # D415 橫放: 640x480 (width x height)
-            if self.camera_info:
-                self.setup_camera_intrinsics()
+            if self.ros_enabled:
+                if self.camera_info:
+                    self.setup_camera_intrinsics()  # ROS 模式：從 CameraInfo 讀取並正確縮放
+            else:
+                # IPC 模式：若 use_calib=True，從 intrinsics.yaml 讀取
+                if config.get('use_calib', False):
+                    self.load_intrinsics_from_yaml('config/intrinsics.yaml')
             
             # We'll initialize SLAM with correct dimensions after first image processing
             self.slam_initialized = False
@@ -845,24 +850,55 @@ class MASt3RSLAMVisualizationNode(Node):
             raise
     
     def setup_camera_intrinsics(self):
-        """Set up camera intrinsics from ROS CameraInfo message (no rotation adjustment for D415)"""
+        """Set up camera intrinsics from ROS CameraInfo (with correct K_frame scaling for MASt3R 512px)"""
+        from mast3r_slam.dataloader import Intrinsics
         K_matrix = np.array(self.camera_info.k).reshape(3, 3)
+        W = self.camera_info.width
+        H = self.camera_info.height
+        calib = [K_matrix[0, 0], K_matrix[1, 1], K_matrix[0, 2], K_matrix[1, 2]]
         
-        # D415 橫放：直接使用原始內參，不需要旋轉調整
-        width = self.camera_info.width
-        height = self.camera_info.height
+        # Intrinsics.from_calib 會計算 K_frame：把 640x480 的 K 縮放到 MASt3R 的 512px 大小
+        intrinsics = Intrinsics.from_calib(512, W, H, calib)
+        if intrinsics is None:
+            self.get_logger().warn("⚠️ Intrinsics.from_calib returned None (use_calib=False in config?)")
+            return
         
-        # Create intrinsics matrix (no rotation adjustment needed)
-        K_basic = np.array([
-            [K_matrix[0, 0], 0, K_matrix[0, 2]],  # fx, 0, cx
-            [0, K_matrix[1, 1], K_matrix[1, 2]],  # 0, fy, cy
-            [0, 0, 1]
-        ], dtype=np.float32)
-        self.K = torch.from_numpy(K_basic).to(self.device, dtype=torch.float32)
+        # K_frame 是對 MASt3R 縮放後圖像正確的內參矩陣
+        self.K = torch.from_numpy(intrinsics.K_frame).to(self.device, dtype=torch.float32)
         
-        self.get_logger().info(f"📐 Camera intrinsics (D415 horizontal):")
-        self.get_logger().info(f"  Resolution: {width}x{height}")
-        self.get_logger().info(f"  Intrinsics: fx={K_matrix[0,0]:.2f}, fy={K_matrix[1,1]:.2f}, cx={K_matrix[0,2]:.2f}, cy={K_matrix[1,2]:.2f}")
+        self.get_logger().info(f"📐 Camera intrinsics (ROS CameraInfo, scaled to MASt3R 512px):")
+        self.get_logger().info(f"  Raw: {W}x{H}, fx={calib[0]:.2f}, fy={calib[1]:.2f}, cx={calib[2]:.2f}, cy={calib[3]:.2f}")
+        self.get_logger().info(f"  K_frame: fx={self.K[0,0]:.2f}, fy={self.K[1,1]:.2f}, cx={self.K[0,2]:.2f}, cy={self.K[1,2]:.2f}")
+
+    def load_intrinsics_from_yaml(self, intrinsics_path='config/intrinsics.yaml'):
+        """Load camera intrinsics from YAML file for IPC mode (with correct K_frame scaling for MASt3R 512px)"""
+        from mast3r_slam.dataloader import Intrinsics
+        try:
+            with open(intrinsics_path, 'r') as f:
+                data = yaml.safe_load(f)
+            W = data['width']
+            H = data['height']
+            calib = data['calibration']  # [fx, fy, cx, cy] or [fx, fy, cx, cy, k1, k2, p1, p2]
+            
+            # Intrinsics.from_calib 會計算 K_frame：把原始解析度的 K 縮放到 MASt3R 的 512px 大小
+            intrinsics = Intrinsics.from_calib(512, W, H, calib)
+            if intrinsics is None:
+                self.get_logger().warn("⚠️ Intrinsics.from_calib returned None (use_calib=False in config?)")
+                return
+            
+            # K_frame 是對 MASt3R 縮放後圖像正確的內參矩陣
+            self.K = torch.from_numpy(intrinsics.K_frame).to(self.device, dtype=torch.float32)
+            
+            self.get_logger().info(f"📐 Camera intrinsics loaded from {intrinsics_path} (scaled to MASt3R 512px):")
+            self.get_logger().info(f"  Raw: {W}x{H}, fx={calib[0]:.4f}, fy={calib[1]:.4f}, cx={calib[2]:.4f}, cy={calib[3]:.4f}")
+            self.get_logger().info(f"  K_frame: fx={self.K[0,0]:.4f}, fy={self.K[1,1]:.4f}, cx={self.K[0,2]:.4f}, cy={self.K[1,2]:.4f}")
+        except FileNotFoundError:
+            self.get_logger().error(f"❌ intrinsics.yaml not found at: {intrinsics_path}")
+            self.get_logger().error(f"   Please create it or disable --use-calib")
+            raise
+        except KeyError as e:
+            self.get_logger().error(f"❌ Missing field in intrinsics.yaml: {e}")
+            raise
         
     def publish_keyframe_pointcloud(self):
         """

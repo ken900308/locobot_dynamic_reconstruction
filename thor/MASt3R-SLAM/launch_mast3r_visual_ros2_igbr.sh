@@ -8,6 +8,7 @@ echo "========================================================"
 # Default arguments
 ENABLE_VIZ=${ENABLE_VIZ:-false}
 IPC_SOCKET=${IPC_SOCKET:-/tmp/ipc_socket/locobot/mast3r_image.sock}
+USE_CALIB=${USE_CALIB:-false}
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -20,9 +21,17 @@ while [[ $# -gt 0 ]]; do
             ENABLE_VIZ=false
             shift
             ;;
+        --use-calib)
+            USE_CALIB=true
+            shift
+            ;;
+        --no-calib)
+            USE_CALIB=false
+            shift
+            ;;
         *)
             echo "❌ Unknown option: $1"
-            echo "Usage: $0 [--viz | --no-viz]"
+            echo "Usage: $0 [--viz | --no-viz] [--use-calib | --no-calib]"
             exit 1
             ;;
     esac
@@ -56,11 +65,19 @@ if [ ! -f "mast3r_slam_visual_IGBR.py" ]; then
     exit 1
 fi
 
+# Select config file based on USE_CALIB flag
+if [ "$USE_CALIB" = "true" ]; then
+    MAST3R_CONFIG="config/calib.yaml"
+else
+    MAST3R_CONFIG="config/base.yaml"
+fi
+
 # Display configuration
 echo ""
 echo "📋 Configuration:"
 echo "  • Visualization: $(if [ "$ENABLE_VIZ" = "true" ]; then echo "ENABLED"; else echo "DISABLED (headless)"; fi)"
 echo "  • IPC socket: $IPC_SOCKET"
+echo "  • Camera calibration: $(if [ "$USE_CALIB" = "true" ]; then echo "ENABLED (config/calib.yaml + intrinsics.yaml)"; else echo "DISABLED (base.yaml, MASt3R self-calibrates)"; fi)"
 echo ""
 
 if [ "$ENABLE_VIZ" = "true" ]; then
@@ -99,6 +116,7 @@ trap cleanup EXIT INT TERM
 # Launch the node
 ENABLE_VIZ="$ENABLE_VIZ" \
 IPC_SOCKET="$IPC_SOCKET" \
+MAST3R_CONFIG="$MAST3R_CONFIG" \
 python3 mast3r_slam_visual_IGBR.py
 
 # This line will only be reached if the Python script exits normally
