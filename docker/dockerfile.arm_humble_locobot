@@ -54,13 +54,16 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates gnupg curl libusb-1.0-0 && \
     mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://librealsense.intel.com/Debian/librealsense.pgp \
-    | gpg --dearmor -o /etc/apt/keyrings/librealsense-archive-keyring.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/librealsense-archive-keyring.gpg] \
-    https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" \
-    > /etc/apt/sources.list.d/librealsense.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    librealsense2-utils librealsense2-dev librealsense2-gl || true && \
+        if curl -fsSL https://librealsense.intel.com/Debian/librealsense.pgp \
+            | gpg --dearmor -o /etc/apt/keyrings/librealsense-archive-keyring.gpg; then \
+            echo "deb [signed-by=/etc/apt/keyrings/librealsense-archive-keyring.gpg] \
+            https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" \
+            > /etc/apt/sources.list.d/librealsense.list; \
+            apt-get update || true; \
+            apt-get install -y --no-install-recommends \
+            librealsense2-utils librealsense2-dev librealsense2-gl || true; \
+        fi && \
+        rm -f /etc/apt/sources.list.d/librealsense.list /etc/apt/keyrings/librealsense-archive-keyring.gpg && \
     rm -rf /var/lib/apt/lists/*
 
 # Install ROS2 Humble tools and common message packages
@@ -74,6 +77,9 @@ RUN apt-get update && apt-get install -y \
     ros-humble-rclpy \
     ros-humble-rosbridge-server \
     ros-humble-foxglove-bridge \
+    ros-humble-rviz2 \
+    ros-humble-rviz-default-plugins \
+    ros-humble-rviz-ogre-vendor \
     && rm -rf /var/lib/apt/lists/*
 
 # Initialize rosdep (if not already done in base image)
