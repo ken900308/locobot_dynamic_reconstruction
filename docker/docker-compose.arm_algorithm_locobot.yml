@@ -16,19 +16,8 @@ x-common-settings: &common
     # IPC socket for GPU communication
     - /tmp/ipc_socket_locobot:/tmp/ipc_socket:rw
 
-    # checkpoints / datasets / logs
-    # - ../MASt3R-SLAM/checkpoints:/workspace/MASt3R-SLAM/checkpoints:ro
-
-    # # Enhanced MASt3R-SLAM files - automatically sync changes
-    # - ../MASt3R-SLAM/resources/programs/lines.glsl:/workspace/MASt3R-SLAM/resources/programs/lines.glsl:ro
-    # - ../MASt3R-SLAM:/workspace/MASt3R-SLAM:rw
-
-    # # Mount ros_node_for_stretch3
-    # - ../ros_node_for_stretch3:/workspace/ros_node_for_stretch3:rw
-    # - ../environment.sh:/workspace/environment.sh:rw
-
     # Mount entire project directory
-    - /home/hrc/Desktop/projects/locobot:/workspace:rw
+    - /home/hrc/Desktop/projects/locobot_aim_dev:/workspace:rw
 
     # udev rules for RealSense
     - /etc/udev/rules.d:/etc/udev/rules.d:ro

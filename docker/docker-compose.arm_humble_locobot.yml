@@ -17,7 +17,7 @@ x-common-settings: &common
     - /tmp/ipc_socket_locobot:/tmp/ipc_socket:rw
 
     # Mount entire project directory
-    - /home/hrc/Desktop/projects/locobot:/workspace:rw
+    - /home/hrc/Desktop/projects/locobot_aim_dev:/workspace:rw
 
     # udev rules for RealSense
     - /etc/udev/rules.d:/etc/udev/rules.d:ro
