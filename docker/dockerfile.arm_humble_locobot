@@ -50,19 +50,23 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install RealSense support (may not have ARM packages, allow failure)
+# Install RealSense support if available, then remove repo to avoid breaking later apt-get update
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates gnupg curl libusb-1.0-0 && \
+    ca-certificates gnupg curl libusb-1.0-0 lsb-release && \
     mkdir -p /etc/apt/keyrings && \
+    rm -f /etc/apt/sources.list.d/librealsense.list && \
     curl -fsSL https://librealsense.intel.com/Debian/librealsense.pgp \
     | gpg --dearmor -o /etc/apt/keyrings/librealsense-archive-keyring.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/librealsense-archive-keyring.gpg] \
-    https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" \
+    echo "deb [signed-by=/etc/apt/keyrings/librealsense-archive-keyring.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" \
     > /etc/apt/sources.list.d/librealsense.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    librealsense2-utils librealsense2-dev librealsense2-gl || true && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        librealsense2-utils \
+        librealsense2-dev \
+        librealsense2-gl || true && \
+    rm -f /etc/apt/sources.list.d/librealsense.list && \
     rm -rf /var/lib/apt/lists/*
-
+    
 # Install ROS2 Humble tools and common message packages
 RUN apt-get update && apt-get install -y \
     python3-rosdep \
