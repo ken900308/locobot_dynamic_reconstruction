@@ -48,6 +48,8 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libsm6 \
     ffmpeg \
+    iputils-ping \
+    resolvconf \
     && rm -rf /var/lib/apt/lists/*
 
 # Install RealSense support (may not have ARM packages, allow failure)
