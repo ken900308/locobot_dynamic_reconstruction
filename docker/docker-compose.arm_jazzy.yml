@@ -1,11 +1,13 @@
+name: locobot_jazzy
+
 #############################
 ###    shared settings    ###
 #############################
 x-common-settings: &common
   build:
     context: ..
-    dockerfile: docker/dockerfile.arm_algorithm_locobot
-  image: mast3r-slam-locobot:arm64-thor
+    dockerfile: docker/dockerfile.arm_jazzy
+  image: mast3r-slam:arm64-thor-locobot
 
   volumes:
     # GUI support
@@ -13,11 +15,8 @@ x-common-settings: &common
     - /tmp/.X11-unix:/tmp/.X11-unix:rw
     - /etc/localtime:/etc/localtime:ro
 
-    # IPC socket for GPU communication
-    - /tmp/ipc_socket_locobot:/tmp/ipc_socket:rw
-
     # Mount entire project directory
-    - /home/hrc/Desktop/projects/locobot:/workspace:rw
+    - /home/hrc/Desktop/projects/locobot_jazzy:/workspace:rw
 
     # udev rules for RealSense
     - /etc/udev/rules.d:/etc/udev/rules.d:ro
@@ -34,7 +33,7 @@ x-common-settings: &common
     - QT_X11_NO_MITSHM=1
     - NVIDIA_VISIBLE_DEVICES=all
     - NVIDIA_DRIVER_CAPABILITIES=all
-    - PS1=\[\e[1;32m\][GPU-Thor-locobot]\[\e[0m\] \w #
+    - PS1=\[\e[1;34m\][locobot]\[\e[0m\] \w #
 
   # Network mode for SSH X11 forwarding
   network_mode: host
@@ -45,7 +44,7 @@ x-common-settings: &common
   stdin_open: true
   privileged: true
   stop_grace_period: 1s
-  working_dir: /workspace/thor/MASt3R-SLAM
+  working_dir: /workspace/thor
 
 ############################
 ###   GPU settings       ###
@@ -69,8 +68,8 @@ x-gpu-settings: &gpu
 ###   Container Services   ###
 ##############################
 services:
-  mast3r_locobot_algorithm:
+  mast3r_locobot_jazzy:
     <<: [ *common, *gpu ]
-    container_name: mast3r_locobot_algorithm
-    shm_size: "4g"
+    container_name: mast3r_locobot_jazzy
+    shm_size: "16g"
     command: [ "/bin/bash" ]

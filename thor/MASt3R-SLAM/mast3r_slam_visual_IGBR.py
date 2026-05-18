@@ -33,16 +33,20 @@ try:
     from rclpy.node import Node
     from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
     from sensor_msgs.msg import Image, CompressedImage, CameraInfo, PointCloud2, PointField
+    from geometry_msgs.msg import TransformStamped
     from std_msgs.msg import Header
     from cv_bridge import CvBridge
+    import tf2_ros
     ROS_AVAILABLE = True
 except Exception:
     rclpy = None
     Node = object
     QoSProfile = ReliabilityPolicy = HistoryPolicy = DurabilityPolicy = None
     Image = CompressedImage = CameraInfo = PointCloud2 = PointField = None
+    TransformStamped = None
     Header = None
     CvBridge = None
+    tf2_ros = None
     ROS_AVAILABLE = False
 
 # Add MASt3R paths
@@ -399,6 +403,13 @@ class MASt3RSLAMVisualizationNode(Node):
             self.declare_parameter('enable_visualization', False)  # 預設關閉視覺化
             self.declare_parameter('max_fps', 15.0)  # 新增：最大處理 FPS
             self.declare_parameter('use_compressed', False)  # 新增：使用壓縮圖像
+            self.declare_parameter('use_rosbridge', False)
+            self.declare_parameter('rosbridge_host', '192.168.0.60')
+            self.declare_parameter('rosbridge_port', 9090)
+            self.declare_parameter('rosbridge_tf_topic', '/tf')
+            self.declare_parameter('rosbridge_tf_static_topic', '/locobot/tf_static_relay')
+            self.declare_parameter('frame_pointcloud_topic', '/mast3r/frame_pointcloud')
+            self.declare_parameter('fullmap_pointcloud_topic', '/mast3r/pointcloud_in_map')
 
             # Get parameters
             self.config_file = self.get_parameter('config_file').get_parameter_value().string_value
@@ -408,6 +419,13 @@ class MASt3RSLAMVisualizationNode(Node):
             self.device = self.get_parameter('device').get_parameter_value().string_value
             self.enable_visualization = self.get_parameter('enable_visualization').get_parameter_value().bool_value
             self.max_fps = self.get_parameter('max_fps').get_parameter_value().double_value
+            self.use_rosbridge = self.get_parameter('use_rosbridge').get_parameter_value().bool_value
+            self.rosbridge_host = self.get_parameter('rosbridge_host').get_parameter_value().string_value
+            self.rosbridge_port = self.get_parameter('rosbridge_port').get_parameter_value().integer_value
+            self.rosbridge_tf_topic = self.get_parameter('rosbridge_tf_topic').get_parameter_value().string_value
+            self.rosbridge_tf_static_topic = self.get_parameter('rosbridge_tf_static_topic').get_parameter_value().string_value
+            self.frame_pointcloud_topic = self.get_parameter('frame_pointcloud_topic').get_parameter_value().string_value
+            self.fullmap_pointcloud_topic = self.get_parameter('fullmap_pointcloud_topic').get_parameter_value().string_value
 
             # 自動偵測或使用參數設定壓縮模式
             use_compressed_param = self.get_parameter('use_compressed').get_parameter_value().bool_value
@@ -422,14 +440,22 @@ class MASt3RSLAMVisualizationNode(Node):
             self.enable_visualization = os.environ.get('MAST3R_ENABLE_VIZ', 'false').lower() == 'true'
             self.max_fps = float(os.environ.get('MAST3R_MAX_FPS', '15.0'))
             self.use_compressed = os.environ.get('MAST3R_USE_COMPRESSED', 'false').lower() == 'true'
+            self.use_rosbridge = False
+            self.rosbridge_host = os.environ.get('ROSBRIDGE_HOST', '192.168.0.60')
+            self.rosbridge_port = int(os.environ.get('ROSBRIDGE_PORT', '9090'))
+            self.rosbridge_tf_topic = os.environ.get('ROSBRIDGE_TF_TOPIC', '/tf')
+            self.rosbridge_tf_static_topic = os.environ.get('ROSBRIDGE_TF_STATIC_TOPIC', '/locobot/tf_static_relay')
+            self.frame_pointcloud_topic = os.environ.get('MAST3R_FRAME_POINTCLOUD_TOPIC', '/mast3r/frame_pointcloud')
+            self.fullmap_pointcloud_topic = os.environ.get('MAST3R_FULLMAP_POINTCLOUD_TOPIC', '/mast3r/pointcloud_in_map')
 
         # Initialize CV bridge (ROS only)
         self.bridge = CvBridge() if self.ros_enabled else None
 
         # IPC socket path (IPC-only)
-        self.ipc_socket_path = os.environ.get('IPC_SOCKET', '/tmp/ipc_socket/locobot/mast3r_image.sock')
+        self.robot_id = os.environ.get('ROBOT_ID', 'robot1')
+        self.ipc_socket_path = os.environ.get('IPC_SOCKET', f'/tmp/ipc_socket/{self.robot_id}/mast3r_image.sock')
         self.ipc_receiver = None
-        self.ipc_pointcloud_socket = os.environ.get('IPC_POINTCLOUD_SOCKET', '/tmp/ipc_socket/locobot/mast3r_pointcloud.sock')
+        self.ipc_pointcloud_socket = os.environ.get('IPC_POINTCLOUD_SOCKET', f'/tmp/ipc_socket/{self.robot_id}/mast3r_pointcloud.sock')
         self.ipc_pointcloud_sender = None
         
         # 改進 1: 使用短 FIFO (deque) 取代深 queue
@@ -472,30 +498,57 @@ class MASt3RSLAMVisualizationNode(Node):
                 durability=DurabilityPolicy.VOLATILE
             )
 
-            # Create subscribers - 根據模式選擇訊息類型
-            if self.use_compressed:
-                self.get_logger().info(f"🗜️ Using CompressedImage subscription")
-                self.image_sub = self.create_subscription(
-                    CompressedImage,
-                    self.image_topic,
-                    self.compressed_image_callback,
-                    image_qos
+            if self.use_rosbridge:
+                self.get_logger().info(
+                    f"🌐 Using rosbridge for robot topics: {self.rosbridge_host}:{self.rosbridge_port}"
                 )
+                self.get_logger().info(f"   image: {self.image_topic}")
+                self.get_logger().info(f"   camera_info: {self.camera_info_topic}")
+                self.get_logger().info(f"   tf: {self.rosbridge_tf_topic}")
+                self.get_logger().info(f"   tf_static: {self.rosbridge_tf_static_topic}")
+                self.ros_client = None
+                self.rosbridge_listener = None
+                self.rosbridge_camera_info_listener = None
+                self.rosbridge_tf_listener = None
+                self.rosbridge_tf_static_listener = None
+                self._rosbridge_image_queue = []
+                self._rosbridge_camera_info_queue = []
+                self._rosbridge_tf_queue = []
+                self._rosbridge_tf_static_queue = []
+                self._static_tf_cache = {}
+                self._rosbridge_tf_count = 0
+                self._rosbridge_tf_static_count = 0
+                self._last_tf_log_time = 0
+                self._rosbridge_queue_lock = threading.Lock()
+                self._rosbridge_camera_info_queue_lock = threading.Lock()
+                self._rosbridge_tf_queue_lock = threading.Lock()
+                self._rosbridge_tf_static_queue_lock = threading.Lock()
+                self.init_rosbridge_in_main_thread()
             else:
-                self.get_logger().info(f"📷 Using raw Image subscription")
-                self.image_sub = self.create_subscription(
-                    Image,
-                    self.image_topic,
-                    self.image_callback,
+                # Create subscribers - 根據模式選擇訊息類型
+                if self.use_compressed:
+                    self.get_logger().info(f"🗜️ Using CompressedImage subscription")
+                    self.image_sub = self.create_subscription(
+                        CompressedImage,
+                        self.image_topic,
+                        self.compressed_image_callback,
+                        image_qos
+                    )
+                else:
+                    self.get_logger().info(f"📷 Using raw Image subscription")
+                    self.image_sub = self.create_subscription(
+                        Image,
+                        self.image_topic,
+                        self.image_callback,
+                        image_qos
+                    )
+
+                self.camera_info_sub = self.create_subscription(
+                    CameraInfo,
+                    self.camera_info_topic,
+                    self.camera_info_callback,
                     image_qos
                 )
-
-            self.camera_info_sub = self.create_subscription(
-                CameraInfo,
-                self.camera_info_topic,
-                self.camera_info_callback,
-                image_qos
-            )
 
             # Timer for stats
             self.stats_timer = self.create_timer(5.0, self.print_stats)
@@ -512,7 +565,7 @@ class MASt3RSLAMVisualizationNode(Node):
             )
             self.frame_pc_publisher = self.create_publisher(
                 PointCloud2,
-                '/mast3r/frame_pointcloud',
+                self.frame_pointcloud_topic,
                 frame_pc_qos
             )
             # [IBGR Chunking] 全域地圖分塊直達 publisher
@@ -525,11 +578,11 @@ class MASt3RSLAMVisualizationNode(Node):
             )
             self.fullmap_pc_publisher = self.create_publisher(
                 PointCloud2,
-                '/mast3r/pointcloud_in_map',  # 直達 Unity 訂閱的 topic
+                self.fullmap_pointcloud_topic,  # 直達 Unity 訂閱的 topic
                 fullmap_qos
             )
-            self.get_logger().info(f"🎯 Frame PointCloud publisher: /mast3r/frame_pointcloud")
-            self.get_logger().info(f"🎯 Full Map direct publisher:  /mast3r/pointcloud_in_map (bypass pc2_to_map)")
+            self.get_logger().info(f"🎯 Frame PointCloud publisher: {self.frame_pointcloud_topic}")
+            self.get_logger().info(f"🎯 Full Map direct publisher:  {self.fullmap_pointcloud_topic} (bypass pc2_to_map)")
         else:
             self.ipc_pointcloud_sender = UDSPointCloudSender(self.ipc_pointcloud_socket, self.get_logger())
         self.min_confidence_threshold = 0.95  # 置信度過濾閾值
@@ -612,6 +665,296 @@ class MASt3RSLAMVisualizationNode(Node):
         except Exception as e:
             self.get_logger().error(f"Error processing IPC image: {str(e)}")
         
+    def _normalize_frame_id(self, frame_id: str) -> str:
+        if frame_id is None:
+            return ''
+        normalized = str(frame_id).strip()
+        if normalized.startswith('/'):
+            normalized = normalized.lstrip('/')
+        return normalized
+
+    def init_rosbridge_in_main_thread(self):
+        """Subscribe robot-facing topics through rosbridge and rebroadcast TF locally."""
+        try:
+            import roslibpy
+            self._roslibpy = roslibpy
+        except ImportError:
+            self.get_logger().error("roslibpy not installed; install it in the container setup")
+            return
+
+        try:
+            self.get_logger().info(f"Connecting to rosbridge at {self.rosbridge_host}:{self.rosbridge_port}")
+            self.ros_client = roslibpy.Ros(host=self.rosbridge_host, port=self.rosbridge_port)
+            self.ros_client.run()
+
+            for _ in range(50):
+                if self.ros_client.is_connected:
+                    break
+                time.sleep(0.1)
+
+            if not self.ros_client.is_connected:
+                self.get_logger().error("Failed to connect to rosbridge")
+                return
+
+            image_topic = self.image_topic
+            image_type = 'sensor_msgs/CompressedImage' if self.use_compressed else 'sensor_msgs/Image'
+            if self.use_compressed and not image_topic.endswith('/compressed'):
+                image_topic = image_topic + '/compressed'
+
+            self.rosbridge_listener = roslibpy.Topic(self.ros_client, image_topic, image_type)
+            self.rosbridge_listener.subscribe(
+                lambda msg: self._queue_rosbridge_msg(self._rosbridge_queue_lock, self._rosbridge_image_queue, msg)
+            )
+            self.get_logger().info(f"Subscribed to {image_topic} via rosbridge")
+
+            self.rosbridge_camera_info_listener = roslibpy.Topic(
+                self.ros_client,
+                self.camera_info_topic,
+                'sensor_msgs/CameraInfo'
+            )
+            self.rosbridge_camera_info_listener.subscribe(
+                lambda msg: self._queue_rosbridge_msg(
+                    self._rosbridge_camera_info_queue_lock,
+                    self._rosbridge_camera_info_queue,
+                    msg
+                )
+            )
+            self.get_logger().info(f"Subscribed to {self.camera_info_topic} via rosbridge")
+
+            self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
+            self.static_tf_broadcaster = tf2_ros.StaticTransformBroadcaster(self)
+
+            self.rosbridge_tf_listener = roslibpy.Topic(
+                self.ros_client,
+                self.rosbridge_tf_topic,
+                'tf2_msgs/TFMessage',
+                queue_size=100,
+                queue_length=1
+            )
+            self.rosbridge_tf_listener.subscribe(
+                lambda msg: self._queue_rosbridge_msg(self._rosbridge_tf_queue_lock, self._rosbridge_tf_queue, msg)
+            )
+            self.get_logger().info(f"Subscribed to {self.rosbridge_tf_topic} via rosbridge")
+
+            self.rosbridge_tf_static_listener = roslibpy.Topic(
+                self.ros_client,
+                self.rosbridge_tf_static_topic,
+                'tf2_msgs/TFMessage',
+                latch=True,
+                queue_size=100,
+                queue_length=1
+            )
+            self.rosbridge_tf_static_listener.subscribe(
+                lambda msg: self._queue_rosbridge_msg(
+                    self._rosbridge_tf_static_queue_lock,
+                    self._rosbridge_tf_static_queue,
+                    msg
+                )
+            )
+            self.get_logger().info(f"Subscribed to {self.rosbridge_tf_static_topic} via rosbridge")
+
+            self.rosbridge_poll_timer = self.create_timer(0.05, self.poll_rosbridge_queue)
+            self.static_tf_republish_timer = self.create_timer(1.0, self.republish_static_tf_cache)
+        except Exception as e:
+            self.get_logger().error(f"Rosbridge init failed: {e}")
+
+    def _queue_rosbridge_msg(self, lock, queue, msg):
+        with lock:
+            queue.append(msg)
+
+    def poll_rosbridge_queue(self):
+        with self._rosbridge_queue_lock:
+            if self._rosbridge_image_queue:
+                msg = self._rosbridge_image_queue.pop(0)
+                self.process_rosbridge_image(msg)
+
+        with self._rosbridge_camera_info_queue_lock:
+            if self._rosbridge_camera_info_queue:
+                msg = self._rosbridge_camera_info_queue.pop(0)
+                self.process_rosbridge_camera_info(msg)
+
+        with self._rosbridge_tf_queue_lock:
+            while self._rosbridge_tf_queue:
+                self.process_rosbridge_tf(self._rosbridge_tf_queue.pop(0), is_static=False)
+
+        with self._rosbridge_tf_static_queue_lock:
+            while self._rosbridge_tf_static_queue:
+                self.process_rosbridge_tf(self._rosbridge_tf_static_queue.pop(0), is_static=True)
+
+    def process_rosbridge_tf(self, msg, is_static=False):
+        try:
+            transforms = msg.get('transforms', [])
+            ros2_transforms = []
+            current_time = self.get_clock().now().to_msg()
+
+            for tf_msg in transforms:
+                t = TransformStamped()
+                header = tf_msg.get('header', {})
+                if is_static:
+                    t.header.stamp.sec = 0
+                    t.header.stamp.nanosec = 0
+                else:
+                    t.header.stamp = current_time
+
+                parent_frame = self._normalize_frame_id(header.get('frame_id', ''))
+                child_frame = self._normalize_frame_id(tf_msg.get('child_frame_id', ''))
+                if not parent_frame or not child_frame:
+                    continue
+                t.header.frame_id = parent_frame
+                t.child_frame_id = child_frame
+
+                transform = tf_msg.get('transform', {})
+                translation = transform.get('translation', {})
+                rotation = transform.get('rotation', {})
+                t.transform.translation.x = float(translation.get('x', 0.0))
+                t.transform.translation.y = float(translation.get('y', 0.0))
+                t.transform.translation.z = float(translation.get('z', 0.0))
+                t.transform.rotation.x = float(rotation.get('x', 0.0))
+                t.transform.rotation.y = float(rotation.get('y', 0.0))
+                t.transform.rotation.z = float(rotation.get('z', 0.0))
+                t.transform.rotation.w = float(rotation.get('w', 1.0))
+                ros2_transforms.append(t)
+
+            if ros2_transforms:
+                if is_static:
+                    for t in ros2_transforms:
+                        self._static_tf_cache[(t.header.frame_id, t.child_frame_id)] = t
+                    self._rosbridge_tf_static_count += len(ros2_transforms)
+                    self.static_tf_broadcaster.sendTransform(list(self._static_tf_cache.values()))
+                else:
+                    self._rosbridge_tf_count += len(ros2_transforms)
+                    self.tf_broadcaster.sendTransform(ros2_transforms)
+
+                now = time.time()
+                if now - self._last_tf_log_time >= 5.0:
+                    self.get_logger().info(
+                        f"Rosbridge TF relay: dynamic={self._rosbridge_tf_count}, "
+                        f"static={self._rosbridge_tf_static_count}, "
+                        f"static_cache={len(self._static_tf_cache)}"
+                    )
+                    self._last_tf_log_time = now
+        except Exception as e:
+            self.get_logger().error(f"Error processing rosbridge TF: {e}")
+
+    def republish_static_tf_cache(self):
+        if not getattr(self, 'use_rosbridge', False):
+            return
+        if not hasattr(self, '_static_tf_cache') or not self._static_tf_cache:
+            return
+        try:
+            self.static_tf_broadcaster.sendTransform(list(self._static_tf_cache.values()))
+        except Exception as e:
+            self.get_logger().warn(f"Failed to republish cached static TF: {e}")
+
+    def process_rosbridge_camera_info(self, msg):
+        if self.camera_info is not None:
+            return
+        try:
+            info = CameraInfo()
+            header = msg.get('header', {})
+            stamp = header.get('stamp', {})
+            info.header.stamp.sec = int(stamp.get('sec', 0)) if isinstance(stamp, dict) else 0
+            info.header.stamp.nanosec = int(stamp.get('nanosec', stamp.get('nsecs', 0))) if isinstance(stamp, dict) else 0
+            info.header.frame_id = self._normalize_frame_id(header.get('frame_id', ''))
+            info.height = int(msg.get('height', 0))
+            info.width = int(msg.get('width', 0))
+            info.distortion_model = msg.get('distortion_model', '')
+            info.d = [float(v) for v in msg.get('d', msg.get('D', []))]
+            k = msg.get('k', msg.get('K', []))
+            r = msg.get('r', msg.get('R', []))
+            pp = msg.get('p', msg.get('P', []))
+            if len(k) == 9:
+                info.k = [float(v) for v in k]
+            if len(r) == 9:
+                info.r = [float(v) for v in r]
+            if len(pp) == 12:
+                info.p = [float(v) for v in pp]
+            info.binning_x = int(msg.get('binning_x', 0))
+            info.binning_y = int(msg.get('binning_y', 0))
+            self.camera_info_callback(info)
+        except Exception as e:
+            self.get_logger().error(f"Error processing rosbridge CameraInfo: {e}")
+
+    def process_rosbridge_image(self, msg):
+        try:
+            import base64
+            current_time = time.time()
+            if self.min_frame_interval > 0:
+                if current_time - self.last_frame_time < self.min_frame_interval:
+                    self.dropped_count += 1
+                    return
+                self.last_frame_time = current_time
+
+            data_base64 = msg.get('data', '')
+            image_data = base64.b64decode(data_base64)
+
+            if self.use_compressed:
+                np_arr = np.frombuffer(image_data, dtype=np.uint8)
+                cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                if cv_image is None:
+                    self.get_logger().warning("Failed to decode rosbridge compressed image")
+                    return
+                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            else:
+                width = int(msg['width'])
+                height = int(msg['height'])
+                encoding = msg.get('encoding', 'rgb8')
+                if encoding in ['rgb8', 'bgr8']:
+                    cv_image = np.frombuffer(image_data, dtype=np.uint8).reshape(height, width, 3)
+                    if encoding == 'bgr8':
+                        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                elif encoding == 'rgba8':
+                    arr = np.frombuffer(image_data, dtype=np.uint8).reshape(height, width, 4)
+                    cv_image = cv2.cvtColor(arr, cv2.COLOR_RGBA2RGB)
+                elif encoding == 'mono8':
+                    arr = np.frombuffer(image_data, dtype=np.uint8).reshape(height, width)
+                    cv_image = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
+                else:
+                    self.get_logger().warning(f"Unsupported rosbridge image encoding: {encoding}")
+                    return
+
+            cv_image = cv_image.astype(np.float32) / 255.0
+            stamp = msg.get('header', {}).get('stamp', {})
+            sec = stamp.get('sec', 0) if isinstance(stamp, dict) else 0
+            nanosec = stamp.get('nanosec', stamp.get('nsecs', 0)) if isinstance(stamp, dict) else 0
+            timestamp = sec + nanosec * 1e-9
+            if timestamp == 0:
+                timestamp = time.time()
+
+            with self.buffer_lock:
+                old_size = len(self.image_buffer)
+                self.image_buffer.append((timestamp, cv_image))
+                if old_size == 3:
+                    self.dropped_count += 1
+                    if self.dropped_count % 50 == 0:
+                        self.get_logger().info(f"Dropped {self.dropped_count} frames due to processing lag")
+
+            self.image_count += 1
+            if self.image_count == 1:
+                mode = 'compressed' if self.use_compressed else 'raw'
+                self.get_logger().info(f"First image received via rosbridge ({mode}), shape={cv_image.shape}")
+        except Exception as e:
+            self.get_logger().error(f"Error processing rosbridge image: {e}")
+
+    def cleanup_rosbridge(self):
+        for attr in [
+            'rosbridge_listener',
+            'rosbridge_camera_info_listener',
+            'rosbridge_tf_listener',
+            'rosbridge_tf_static_listener',
+        ]:
+            listener = getattr(self, attr, None)
+            if listener is not None:
+                try:
+                    listener.unsubscribe()
+                except Exception:
+                    pass
+        if getattr(self, 'ros_client', None) is not None:
+            try:
+                self.ros_client.terminate()
+            except Exception:
+                pass
+
     def camera_info_callback(self, msg):
         """Store camera intrinsics from ROS CameraInfo message"""
         if not self.ros_enabled:
@@ -1654,6 +1997,9 @@ class MASt3RSLAMVisualizationNode(Node):
             print("⏳ Waiting for processing thread to finish...")
             self.processing_thread.join(timeout=5)
         
+        if getattr(self, 'use_rosbridge', False):
+            self.cleanup_rosbridge()
+
         self.cleanup_processes()
         
         # Clear global reference

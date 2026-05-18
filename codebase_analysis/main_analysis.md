@@ -945,3 +945,176 @@ viz process 也是一樣。
 1. `tracker.track(frame)` 的逐段白話
 2. `run_backend()` 裡 `FactorGraph.add_factors()` 與 `solve_GN_*()` 的資料流
 3. `Frame` / `SharedStates` / `SharedKeyframes` 的欄位對照表
+
+---
+
+## `main.py` Flow Chart
+
+下面這張圖是把 [`main.py`](/home/hrc/Desktop/projects/locobot/thor/MASt3R-SLAM/main.py:1) 的控制流程壓成一張圖。
+
+```mermaid
+flowchart TD
+    A[Program Start] --> B[Register SIGINT handler]
+    B --> C[Setup runtime options]
+    C --> D[Parse CLI args]
+    D --> E[Load config]
+    E --> F[Create process manager and viz queues]
+    F --> G[Load dataset and subsample]
+    G --> H{Manual calibration file provided}
+    H -- Yes --> I[Load intrinsics file and build camera intrinsics]
+    H -- No --> J[Skip manual calib injection]
+    I --> K[Create SharedKeyframes and SharedStates]
+    J --> K
+    K --> L{Visualization enabled}
+    L -- Yes --> M[Start viz process]
+    L -- No --> N[Skip viz process]
+    M --> O[Load MASt3R model]
+    N --> O
+    O --> P[Share model memory]
+    P --> Q{Configuration uses calibration}
+    Q -- Missing calib --> R[Warn and exit]
+    Q -- Has calib --> S[Build calibration tensor and store in keyframes]
+    Q -- No --> T[No calibration tensor]
+    S --> U[Remove previous output files]
+    T --> U
+    U --> V[Create FrameTracker]
+    V --> W[Init last WindowMsg]
+    W --> X[Start backend process]
+    X --> Y[Enter main loop]
+
+    Y --> Z{Should exit}
+    Z -- Yes --> ZA[Break loop]
+    Z -- No --> ZB[Read mode and viz message]
+
+    ZB --> ZC{Viz terminate request}
+    ZC -- Yes --> ZD[Set mode to TERMINATED and break loop]
+    ZC -- No --> ZE{Visualization paused}
+
+    ZE -- Yes --> ZF[Pause state then sleep and continue]
+    ZE -- No --> ZG[Unpause state]
+
+    ZG --> ZH{Reached end of dataset}
+    ZH -- Yes --> ZI[Set mode to TERMINATED and break loop]
+    ZH -- No --> ZJ[Read next timestamp and image]
+
+    ZJ --> ZK[Get initial pose guess]
+    ZK --> ZL[Create frame from image and pose guess]
+    ZL --> ZM{Current mode}
+
+    ZM -- INIT --> ZN[Run mono inference]
+    ZN --> ZO[Update frame pointmap]
+    ZO --> ZP[Append frame to keyframes]
+    ZP --> ZQ[Queue global optimization]
+    ZQ --> ZR[Set mode to TRACKING]
+    ZR --> ZS[Store current frame in shared state]
+    ZS --> ZT[Increment index and continue]
+
+    ZM -- TRACKING --> ZU[Run tracker on current frame]
+    ZU --> ZV{Need relocalization}
+    ZV -- Yes --> ZW[Set mode to RELOC]
+    ZV -- No --> ZX[Keep TRACKING]
+    ZW --> ZY[Store current frame in shared state]
+    ZX --> ZY
+
+    ZM -- RELOC --> ZZ[Run mono inference]
+    ZZ --> ZZA[Update frame pointmap]
+    ZZA --> ZZB[Store current frame in shared state]
+    ZZB --> ZZC[Queue relocalization task]
+    ZZC --> ZZD{Single thread mode}
+    ZZD -- Yes --> ZZE[Wait until reloc done]
+    ZZD -- No --> ZZF[Continue]
+    ZZE --> ZZG[Continue main flow]
+    ZZF --> ZZG
+
+    ZY --> AAA{Add new keyframe}
+    ZZG --> AAA
+    AAA -- Yes --> AAB[Append frame to keyframes]
+    AAB --> AAC[Queue global optimization]
+    AAC --> AAD{Single thread mode}
+    AAD -- Yes --> AAE[Wait backend task done]
+    AAD -- No --> AAF[Continue]
+    AAE --> AAG[Periodic save check]
+    AAF --> AAG
+    AAA -- No --> AAG
+
+    AAG --> AAH{Have processed frames and keyframes}
+    AAH -- Yes --> AAI[Save partial reconstruction]
+    AAH -- No --> AAJ[Skip save]
+    AAI --> AAK{Reached logging interval}
+    AAJ --> AAK
+    AAK -- Yes --> AAL[Print FPS and keyframe count]
+    AAK -- No --> AAM[Skip log]
+    AAL --> AAN[Increment frame index]
+    AAM --> AAN
+    AAN --> Y
+
+    ZA --> ABA[Final save]
+    ZD --> ABA
+    ZI --> ABA
+    ABA --> ABB{Dataset saves results}
+    ABB -- Yes --> ABC[Save final reconstruction]
+    ABB -- No --> ABD[Skip final save]
+    ABC --> ABE{Save frames enabled}
+    ABD --> ABE
+    ABE -- Yes --> ABF[Dump all frames as PNG]
+    ABE -- No --> ABG[Skip frame dump]
+    ABF --> ABH[Print done]
+    ABG --> ABH
+    ABH --> ABI[Terminate and join backend process]
+    ABI --> ABJ[Terminate and join viz process]
+    ABJ --> ABK[Program End]
+
+    subgraph BackendProcess [Backend process]
+        BA[Backend start] --> BB[Set global config]
+        BB --> BC[Create FactorGraph]
+        BC --> BD[Create retrieval database]
+        BD --> BE[Backend loop]
+        BE --> BF{Mode is TERMINATED}
+        BF -- Yes --> BG[Backend exit]
+        BF -- No --> BH{INIT or paused}
+        BH -- Yes --> BI[Sleep and continue]
+        BH -- No --> BJ{Mode is RELOC}
+        BJ -- Yes --> BK[Get current frame from shared state]
+        BK --> BL[Run relocalization]
+        BL --> BM{Relocalization success}
+        BM -- Yes --> BN[Set mode to TRACKING]
+        BM -- No --> BO[keep current mode]
+        BN --> BP[Dequeue relocalization signal]
+        BO --> BP
+        BP --> BE
+
+        BJ -- No --> BQ{Have global optimization tasks}
+        BQ -- No --> BR[Sleep and continue]
+        BQ -- Yes --> BS[Take newest task idx]
+        BS --> BT[Build candidate edge list from previous keyframe and retrieval]
+        BT --> BU[Add factors to graph]
+        BU --> BV[Write edges to shared state for viz]
+        BV --> BW{Use calibration}
+        BW -- Yes --> BX[Solve GN with calibration]
+        BW -- No --> BY[Solve GN with rays]
+        BX --> BZ[Pop completed task]
+        BY --> BZ
+        BZ --> BE
+        BI --> BE
+        BR --> BE
+    end
+```
+
+### 這張圖怎麼看
+
+- 主幹從 `Program Start` 到 `Program End` 是主執行緒
+- `BACKEND_PROCESS` 那個框是另一個 process，在背景跟主迴圈並行跑
+- `INIT / TRACKING / RELOC` 是主程式最核心的三個模式切換
+- `queue_global_optimization` 和 `queue_reloc` 是主執行緒丟工作給 backend 的兩個主要入口
+
+### 如果只想記最短版
+
+可以把整個 `main.py` 記成：
+
+1. 先初始化資料、模型、共享狀態、背景程序
+2. 主迴圈持續讀 frame
+3. 第一張做初始化
+4. 平常做 tracking
+5. 追丟了就進 relocalization
+6. 該升 keyframe 時就通知 backend 做 global optimization
+7. 定期存圖，最後收尾

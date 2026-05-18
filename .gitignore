@@ -5,3 +5,6 @@
 .vscode/
 /home/hrc/Desktop/projects/locobot/thor/MASt3R-SLAM/checkpoints/
 
+.github/
+
+thor/ros2_ws/src/stretch3_ros_nodes/stretch3_ros_nodes/

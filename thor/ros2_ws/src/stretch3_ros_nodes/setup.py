@@ -25,6 +25,7 @@ setup(
             "ipc_pointcloud_receiver = stretch3_ros_nodes.ipc_pointcloud_receiver:main",
             "auto_anchor_from_pointcloud_stretch3 = stretch3_ros_nodes.auto_anchor_from_pointcloud_stretch3:main",
             "pc2_to_map_stretch3 = stretch3_ros_nodes.pc2_to_map_stretch3:main",
+            "multi_robot_fusion_node = stretch3_ros_nodes.multi_robot_fusion_node:main",
         ],
     },
 )

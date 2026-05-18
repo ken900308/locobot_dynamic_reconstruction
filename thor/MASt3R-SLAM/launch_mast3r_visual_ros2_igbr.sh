@@ -1,16 +1,30 @@
 #!/bin/bash
-# Launch MASt3R-SLAM Node for Stretch3 Robot (IGBR Double Buffering Version)
+# Launch MASt3R-SLAM Node for LoCoBot (IGBR Double Buffering Version)
 set -e
 
-echo "🚀 Starting MASt3R-SLAM (IGBR Architecture)"
+echo "Starting MASt3R-SLAM (IGBR Architecture)"
 echo "========================================================"
 
-# Default arguments
 ENABLE_VIZ=${ENABLE_VIZ:-false}
-IPC_SOCKET=${IPC_SOCKET:-/tmp/ipc_socket/locobot/mast3r_image.sock}
+ROBOT_ID=${ROBOT_ID:-robot1}
+MAST3R_CONFIG=${MAST3R_CONFIG:-config/base.yaml}
+MAST3R_SAVE_AS=${MAST3R_SAVE_AS:-${ROBOT_ID}_slam}
+MAST3R_IMAGE_TOPIC=${MAST3R_IMAGE_TOPIC:-${IMAGE_TOPIC:-/locobot/camera/camera/color/image_raw/compressed}}
+MAST3R_CAMERA_INFO_TOPIC=${MAST3R_CAMERA_INFO_TOPIC:-${CAMERA_INFO_TOPIC:-/locobot/camera/camera/color/camera_info}}
+MAST3R_DEVICE=${MAST3R_DEVICE:-cuda:0}
+MAST3R_MAX_FPS=${MAST3R_MAX_FPS:-15.0}
+MAST3R_USE_COMPRESSED=${MAST3R_USE_COMPRESSED:-auto}
+USE_ROSBRIDGE=${USE_ROSBRIDGE:-false}
+ROSBRIDGE_HOST=${ROSBRIDGE_HOST:-192.168.0.60}
+ROSBRIDGE_PORT=${ROSBRIDGE_PORT:-9090}
+ROSBRIDGE_TF_TOPIC=${ROSBRIDGE_TF_TOPIC:-/tf}
+ROSBRIDGE_TF_STATIC_TOPIC=${ROSBRIDGE_TF_STATIC_TOPIC:-/locobot/tf_static_relay}
+LOCAL_TF_TOPIC=${LOCAL_TF_TOPIC:-/${ROBOT_ID}/tf}
+LOCAL_TF_STATIC_TOPIC=${LOCAL_TF_STATIC_TOPIC:-/${ROBOT_ID}/tf_static}
+MAST3R_FRAME_POINTCLOUD_TOPIC=${MAST3R_FRAME_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast3r/frame_pointcloud}
+MAST3R_FULLMAP_POINTCLOUD_TOPIC=${MAST3R_FULLMAP_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast3r/pointcloud_in_map}
 USE_CALIB=${USE_CALIB:-false}
 
-# Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         -v|--viz)
@@ -29,98 +43,118 @@ while [[ $# -gt 0 ]]; do
             USE_CALIB=false
             shift
             ;;
+        --rosbridge)
+            USE_ROSBRIDGE=true
+            shift
+            ;;
+        --no-rosbridge)
+            USE_ROSBRIDGE=false
+            shift
+            ;;
+        --rosbridge-host)
+            ROSBRIDGE_HOST="$2"
+            shift 2
+            ;;
+        --rosbridge-port)
+            ROSBRIDGE_PORT="$2"
+            shift 2
+            ;;
+        --tf-topic)
+            ROSBRIDGE_TF_TOPIC="$2"
+            shift 2
+            ;;
+        --tf-static-topic)
+            ROSBRIDGE_TF_STATIC_TOPIC="$2"
+            shift 2
+            ;;
         *)
-            echo "❌ Unknown option: $1"
-            echo "Usage: $0 [--viz | --no-viz] [--use-calib | --no-calib]"
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--viz | --no-viz] [--use-calib | --no-calib] [--rosbridge | --no-rosbridge]"
             exit 1
             ;;
     esac
 done
 
-# Check if we're in the container
 if [ ! -d "/workspace/thor/MASt3R-SLAM" ]; then
-    echo "❌ Error: Must be run inside the mast3r-slam container"
-    echo "Run: cd workspace/docker && ./run_mast3r.sh"
+    echo "Error: Must be run inside the mast3r-slam container"
     exit 1
 fi
 
-# Change to MASt3R-SLAM directory
+if [ -f /opt/ros/jazzy/setup.bash ]; then
+    set +u
+    source /opt/ros/jazzy/setup.bash
+    set -u
+fi
+if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then
+    set +u
+    source /workspace/thor/ros2_ws/install/setup.bash
+    set -u
+fi
+
 cd /workspace/thor/MASt3R-SLAM
-
-# Clear CUDA cache if available
-echo "🔧 Clearing CUDA cache..."
 python3 -c "import torch; torch.cuda.empty_cache();" 2>/dev/null || true
-
-# Setup Python paths for MASt3R
 export PYTHONPATH="/workspace/thor/MASt3R-SLAM/thirdparty/mast3r:/workspace/thor/MASt3R-SLAM:${PYTHONPATH:-}"
-
-# Create logs directory
 mkdir -p logs
-echo "📁 Logs directory ready: $(pwd)/logs"
 
-# Check if the visualization node exists
 if [ ! -f "mast3r_slam_visual_IGBR.py" ]; then
-    echo "❌ Error: mast3r_slam_visual_IGBR.py not found"
-    echo "Make sure the file is properly mounted in the container"
+    echo "Error: mast3r_slam_visual_IGBR.py not found"
     exit 1
 fi
 
-# Select config file based on USE_CALIB flag
 if [ "$USE_CALIB" = "true" ]; then
     MAST3R_CONFIG="config/calib.yaml"
 else
     MAST3R_CONFIG="config/base.yaml"
 fi
 
-# Display configuration
 echo ""
-echo "📋 Configuration:"
-echo "  • Visualization: $(if [ "$ENABLE_VIZ" = "true" ]; then echo "ENABLED"; else echo "DISABLED (headless)"; fi)"
-echo "  • IPC socket: $IPC_SOCKET"
-echo "  • Camera calibration: $(if [ "$USE_CALIB" = "true" ]; then echo "ENABLED (config/calib.yaml + intrinsics.yaml)"; else echo "DISABLED (base.yaml, MASt3R self-calibrates)"; fi)"
-echo ""
-
-if [ "$ENABLE_VIZ" = "true" ]; then
-    echo "🎥 Starting MASt3R-SLAM with VISUALIZATION enabled..."
-else
-    echo "🖥️  Starting MASt3R-SLAM in HEADLESS mode (no visualization)..."
-    echo "💡 Tip: Use '--viz' flag to enable visualization"
-fi
-
-echo ""
-echo "🔴 Press Ctrl+C to stop and save final reconstruction"
+echo "Configuration:"
+echo "  Robot ID: $ROBOT_ID"
+echo "  Visualization: $(if [ "$ENABLE_VIZ" = "true" ]; then echo ENABLED; else echo DISABLED; fi)"
+echo "  Config: $MAST3R_CONFIG"
+echo "  Save as: $MAST3R_SAVE_AS"
+echo "  Image topic: $MAST3R_IMAGE_TOPIC"
+echo "  CameraInfo topic: $MAST3R_CAMERA_INFO_TOPIC"
+echo "  Device: $MAST3R_DEVICE"
+echo "  Max FPS: $MAST3R_MAX_FPS"
+echo "  Camera calibration: $(if [ "$USE_CALIB" = "true" ]; then echo ENABLED; else echo DISABLED; fi)"
+echo "  Robot transport: $(if [ "$USE_ROSBRIDGE" = "true" ]; then echo "rosbridge $ROSBRIDGE_HOST:$ROSBRIDGE_PORT"; else echo "native DDS"; fi)"
+echo "  Remote TF topics: $ROSBRIDGE_TF_TOPIC, $ROSBRIDGE_TF_STATIC_TOPIC"
+echo "  Local TF topics: $LOCAL_TF_TOPIC, $LOCAL_TF_STATIC_TOPIC"
+echo "  PointCloud outputs: $MAST3R_FRAME_POINTCLOUD_TOPIC, $MAST3R_FULLMAP_POINTCLOUD_TOPIC"
 echo ""
 
-# Function to handle cleanup on exit
 cleanup() {
     echo ""
-    echo "🛑 Shutting down MASt3R-SLAM IGBR..."
-    
-    # Send SIGTERM to the Python process
+    echo "Shutting down MASt3R-SLAM IGBR..."
     pkill -TERM -f mast3r_slam_visual_IGBR 2>/dev/null || true
-    
-    # Wait a bit for graceful shutdown
     sleep 3
-    
-    # Force kill if still running
     pkill -9 -f mast3r_slam_visual_IGBR 2>/dev/null || true
-    
-    echo "✅ Cleanup completed"
-    echo ""
-    echo "📁 Check logs/ directory for saved reconstructions:"
 }
-
-# Set up trap for cleanup
 trap cleanup EXIT INT TERM
 
-# Launch the node
-ENABLE_VIZ="$ENABLE_VIZ" \
-IPC_SOCKET="$IPC_SOCKET" \
-MAST3R_CONFIG="$MAST3R_CONFIG" \
-python3 mast3r_slam_visual_IGBR.py
+ROS_ARGS=(
+    --ros-args
+    -p "config_file:=$MAST3R_CONFIG"
+    -p "save_as:=$MAST3R_SAVE_AS"
+    -p "image_topic:=$MAST3R_IMAGE_TOPIC"
+    -p "camera_info_topic:=$MAST3R_CAMERA_INFO_TOPIC"
+    -p "device:=$MAST3R_DEVICE"
+    -p "enable_visualization:=$ENABLE_VIZ"
+    -p "max_fps:=$MAST3R_MAX_FPS"
+    -p "use_rosbridge:=$USE_ROSBRIDGE"
+    -p "rosbridge_host:=$ROSBRIDGE_HOST"
+    -p "rosbridge_port:=$ROSBRIDGE_PORT"
+    -p "rosbridge_tf_topic:=$ROSBRIDGE_TF_TOPIC"
+    -p "rosbridge_tf_static_topic:=$ROSBRIDGE_TF_STATIC_TOPIC"
+    -p "frame_pointcloud_topic:=$MAST3R_FRAME_POINTCLOUD_TOPIC"
+    -p "fullmap_pointcloud_topic:=$MAST3R_FULLMAP_POINTCLOUD_TOPIC"
+    -r "/tf:=$LOCAL_TF_TOPIC"
+    -r "/tf_static:=$LOCAL_TF_STATIC_TOPIC"
+)
 
-# This line will only be reached if the Python script exits normally
-echo ""
-echo "✅ MASt3R-SLAM (IGBR) completed"
-echo "📁 Saved reconstructions in logs/ directory:"
-ls -la logs/*.ply 2>/dev/null || echo "   (No PLY files found)"
+if [ "$MAST3R_USE_COMPRESSED" != "auto" ]; then
+    ROS_ARGS+=(-p "use_compressed:=$MAST3R_USE_COMPRESSED")
+fi
+
+ROBOT_ID="$ROBOT_ID" python3 mast3r_slam_visual_IGBR.py "${ROS_ARGS[@]}"

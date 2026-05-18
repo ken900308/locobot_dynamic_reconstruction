@@ -14,20 +14,39 @@ CONFIG_DEFAULT="config/base.yaml"
 DATASET="${1:-$DATASET_DEFAULT}"
 CONFIG="${2:-$CONFIG_DEFAULT}"
 EXTRA_ARGS="${3:-}"
+IMAGE_NAME="mast3r-slam:arm64-thor-locobot"
+CONTAINER_NAME="mast3r_locobot_jazzy"
+COMPOSE_FILE="docker/docker-compose.arm_jazzy.yml"
+
+# Set this to 1 after changing the Dockerfile and wanting a rebuild.
+# Keep it at 0 to reuse the existing image for faster startup.
+REBUILD_IMAGE=0
 
 # Allow X11 for GUI
 if command -v xhost > /dev/null 2>&1; then
   xhost +local:root > /dev/null 2>&1 || true
 fi
 
-# Build and start the container
-echo ">>> Building and starting ARM container..."
-docker compose -f docker/docker-compose.arm_algorithm_locobot.yml build
-docker compose -f docker/docker-compose.arm_algorithm_locobot.yml up -d mast3r_locobot_algorithm
+# Build only when the image is missing, REBUILD_IMAGE=1, or FORCE_BUILD=1 is set.
+if [ "${FORCE_BUILD:-$REBUILD_IMAGE}" = "1" ] || ! docker image inspect "$IMAGE_NAME" > /dev/null 2>&1; then
+  echo ">>> Building ARM image..."
+  docker compose -f "$COMPOSE_FILE" build
+else
+  echo ">>> Reusing existing ARM image: $IMAGE_NAME"
+fi
+
+echo ">>> Starting ARM container..."
+docker compose -f "$COMPOSE_FILE" up -d --no-build mast3r_locobot_jazzy
 
 echo ">>> Setting up container environment..."
-docker exec -it mast3r_locobot_algorithm bash -lc "
+docker exec -it "$CONTAINER_NAME" env FORCE_SETUP="${FORCE_SETUP:-0}" bash -lc "
   set -euo pipefail
+
+  SETUP_MARKER=/usr/local/share/mast3r_locobot_arm_jazzy_setup_complete
+  if [ \"\$FORCE_SETUP\" != \"1\" ] && [ -f \"\$SETUP_MARKER\" ]; then
+    echo '>>> Container environment already set up; set FORCE_SETUP=1 to reinstall'
+    exit 0
+  fi
 
   echo '>>> Fixing GUI Resources for MASt3R-SLAM'
   
@@ -58,13 +77,13 @@ docker exec -it mast3r_locobot_algorithm bash -lc "
   cd /workspace/thor/MASt3R-SLAM
 
   echo '>>> Upgrading packaging tools'
-  python -m pip install -U pip 'setuptools>=70' 'packaging>=24.1' 'wheel>=0.43' ninja
+  python -m pip install -U pip 'setuptools==70.0.0' 'packaging>=24.1' 'wheel>=0.43' ninja
 
   echo '>>> Pre-installing imgui wheel'
   python -m pip install --only-binary=:all: \"imgui==2.0.0\" || python -m pip install \"imgui[glfw,opengl3]==2.0.0\"
 
-  echo '>>> Installing Cython and OpenGL dependencies'
-  python -m pip install 'Cython>=0.24,<0.30' PyOpenGL
+  echo '>>> Installing Cython, OpenGL, and rosbridge dependencies'
+  python -m pip install 'Cython>=0.24,<0.30' PyOpenGL roslibpy
 
   echo '>>> Installing thirdparty packages'
   python -m pip install --no-build-isolation -e thirdparty/mast3r/asmk
@@ -93,5 +112,14 @@ else:
     print('Please confirm container has runtime: nvidia set')
 PY
 
+  echo '>>> Building Locobot ROS workspace'
+  set +u
+  source /opt/ros/jazzy/setup.bash
+  set -u
+  cd /workspace/thor/ros2_ws
+  colcon build --symlink-install
+
   echo '>>> Installation complete! Container is ready'
+  mkdir -p \$(dirname \"\$SETUP_MARKER\")
+  touch \"\$SETUP_MARKER\"
 "

@@ -70,42 +70,47 @@ RUN apt-get update && apt-get install -y \
     libc++abi-dev \
     libpng-dev \
     libjpeg-dev \
-    iputils-ping \
-    resolvconf \
     && rm -rf /var/lib/apt/lists/*
 
-# Install RealSense support (may not have ARM packages, allow failure)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates gnupg curl libusb-1.0-0 && \
-    mkdir -p /etc/apt/keyrings && \
+# Install RealSense support (may not have ARM packages, allow failure).
+# If Intel rotates the apt signing key or does not publish packages for this
+# Ubuntu release, remove the source list so later apt-get update steps still work.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates gnupg curl libusb-1.0-0; \
+    mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://librealsense.intel.com/Debian/librealsense.pgp \
-    | gpg --dearmor -o /etc/apt/keyrings/librealsense-archive-keyring.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/librealsense-archive-keyring.gpg] \
-    https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" \
-    > /etc/apt/sources.list.d/librealsense.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    librealsense2-utils librealsense2-dev librealsense2-gl || true && \
+    | gpg --dearmor -o /etc/apt/keyrings/librealsense-archive-keyring.gpg; \
+    echo "deb [signed-by=/etc/apt/keyrings/librealsense-archive-keyring.gpg] https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" \
+    > /etc/apt/sources.list.d/librealsense.list; \
+    if apt-get update && apt-get install -y --no-install-recommends librealsense2-utils librealsense2-dev librealsense2-gl; then \
+        echo "RealSense apt packages installed"; \
+    else \
+        echo "WARNING: RealSense apt repo unavailable; removing source list and continuing"; \
+        rm -f /etc/apt/sources.list.d/librealsense.list /etc/apt/keyrings/librealsense-archive-keyring.gpg; \
+        apt-get update; \
+    fi; \
     rm -rf /var/lib/apt/lists/*
 
 # # Install ROS2 Jazzy (Ubuntu 24.04 compatible)
 # # Note: ROS Humble is for Ubuntu 22.04, Jazzy is for Ubuntu 24.04 (noble)
-# RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-#     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu noble main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null && \
-#     apt-get update && apt-get install -y \
-#     ros-jazzy-ros-base \
-#     python3-rosdep \
-#     python3-colcon-common-extensions \
-#     ros-jazzy-cv-bridge \
-#     ros-jazzy-geometry-msgs \
-#     ros-jazzy-sensor-msgs \
-#     ros-jazzy-std-msgs \
-#     ros-jazzy-rclpy \
-#     ros-jazzy-rosbridge-server \
-#     ros-jazzy-foxglove-bridge \
-#     && rm -rf /var/lib/apt/lists/*
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu noble main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null && \
+    apt-get update && apt-get install -y \
+    ros-jazzy-ros-base \
+    python3-rosdep \
+    python3-colcon-common-extensions \
+    ros-jazzy-cv-bridge \
+    ros-jazzy-geometry-msgs \
+    ros-jazzy-sensor-msgs \
+    ros-jazzy-std-msgs \
+    ros-jazzy-rclpy \
+    ros-jazzy-rosbridge-server \
+    ros-jazzy-foxglove-bridge \
+    && rm -rf /var/lib/apt/lists/*
 
 # # Initialize rosdep (if not already done in base image)
-# RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && rosdep update || true
+RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && rosdep update || true
 
 # Configure library paths for CUDA and HPC-X (fix libucc undefined symbol issue)
 RUN printf "%s\n" \
@@ -136,7 +141,7 @@ RUN pip install --no-cache-dir \
     scipy \
     wandb \
     warmup_scheduler \
-    # roslibpy \
+    roslibpy \
     opencv-python \
     "imgui[glfw,opengl3]==2.0.0"
 
@@ -172,14 +177,14 @@ RUN pip install --no-cache-dir pyrealsense2 || echo "WARNING: pyrealsense2 not a
 
 # Upgrade packaging tools (same as x86 version)
 RUN pip install --upgrade pip && \
-    pip install --upgrade "setuptools>=70" "packaging>=24.1" "wheel>=0.43" ninja
+    pip install --upgrade "setuptools==70.0.0" "packaging>=24.1" "wheel>=0.43" ninja
 
 # Setup workspace
 WORKDIR /workspace
 COPY thor/MASt3R-SLAM /workspace/thor/MASt3R-SLAM
 
 # Set custom prompt for GPU container
-RUN echo 'PS1="\[\e[1;32m\][GPU-Thor-locobot]\[\e[0m\] \w # "' >> ~/.bashrc
+RUN echo 'PS1="\[\e[1;34m\][locobot]\[\e[0m\] \w # "' >> ~/.bashrc
 
 # Install MASt3R thirdparty deps and build extensions for SM 11.0
 RUN set -eux; \
@@ -189,6 +194,6 @@ RUN set -eux; \
     TORCH_CUDA_ARCH_LIST="11.0" FORCE_CUDA=1 pip install --no-build-isolation . --no-cache-dir
 
 # Source ROS setup in bashrc
-# RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc || true
+RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc || true
 
 CMD ["/bin/bash"]

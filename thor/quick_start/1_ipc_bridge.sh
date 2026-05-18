@@ -1,7 +1,6 @@
 #!/bin/bash
-echo "Starting IPC Bridge Node..."
-source /opt/ros/humble/setup.bash
-if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then
-    source /workspace/thor/ros2_ws/install/setup.bash
-fi
-ros2 run stretch3_ros_nodes ipc_bridge_node
+set -euo pipefail
+
+echo "IPC bridge is no longer needed in the Jazzy single-container flow."
+echo "Use quick_start/2_mast3r_slam.sh; MASt3R now subscribes to robot topics through rosbridge."
+exec /workspace/thor/quick_start/2_mast3r_slam.sh "$@"
