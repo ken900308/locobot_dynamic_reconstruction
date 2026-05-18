@@ -1,162 +1,156 @@
-# MASt3R-SLAM × Locobot — 即時場景重建系統
+# MASt3R-SLAM x Locobot Jazzy
 
-本專案在 NVIDIA AGX Thor 上運行 MASt3R-SLAM，透過 IPC 橋接將點雲即時推送到 Unity 進行可視化，採用 **IBGR（Incremental Build, Global Redraw）** 雙緩衝架構。
+This repo runs the LoCoBot side of the MASt3R-SLAM reconstruction pipeline on the NVIDIA AGX Thor. The current pipeline is ROS-based and uses quick_start scripts `2`, `4`, and `5`.
 
-系統由兩個 Docker 容器組成：
+The old IPC path is still present in the tree for reference, but it is not the active workflow.
 
-| 容器名稱                                    | 功能                                                |
-| ------------------------------------------- | --------------------------------------------------- |
-| `mast3r_locobot_algorithm` (GPU Container)  | MASt3R-SLAM 演算法核心，負責影像推理與 PGO          |
-| `mast3r_locobot_ros_humble` (ROS Container) | IPC 橋接、TF 建立、點雲轉換、rosbridge 廣播至 Unity |
+## Current Pipeline
 
----
+```text
+LoCoBot robot ROS graph
+  image / camera_info / tf relay
+        |
+        | rosbridge
+        v
+Thor MASt3R container
+  quick_start/2_mast3r_slam.sh
+        |
+        +--> /robot1/mast3r/frame_pointcloud
+        +--> /robot1/mast3r/pointcloud_in_map
 
-## 🚀 啟動流程
+  quick_start/4_auto_anchor.sh
+        |
+        +--> locobot/odom -> robot1/mast3r_map
 
-### Step 1：啟動 Docker 容器
-
-在 host machine 上，開兩個terminal，分別`cd`到專案根目錄後執行：
-
-```bash
-cd /path_to_where_you_clone_this_repo/locobot/docker
-
-# 啟動 ROS2 Humble 容器
-./run_mast3r_arm_humble_locobot.sh
+  quick_start/5_pc2_to_map.sh
+        |
+        +--> /robot1/mast3r/pointcloud_in_map
 ```
 
-```bash
-cd /path_to_where_you_clone_this_repo/locobot/docker
+## Robot Identity
 
-# 啟動 GPU (Algorithm) 容器
-./run_mast3r_arm_algorithm_locobot.sh
+LoCoBot is treated as `robot1`.
+
+Default local Thor topics:
+
+```text
+/robot1/tf
+/robot1/tf_static
+/robot1/mast3r/frame_pointcloud
+/robot1/mast3r/pointcloud_in_map
 ```
 
----
+Default TF frames:
 
-### Step 2：設定 ROS Domain ID（每個容器進入後先做）
-
-進入任何一個容器後，**都必須先 source environment**：
-
-```bash
-source /workspace/thor/environment.sh 150
+```text
+WORLD_FRAME=locobot/odom
+CAMERA_FRAME=locobot/camera_color_optical_frame
+MAST3R_FRAME=robot1/mast3r_map
 ```
 
-> `150` 為 ROS_DOMAIN_ID，確保與 locobot 機器人在同一個 ROS2 網路分區。
+The robot-side tf relay is expected to provide non-conflicting frame names before data reaches Thor.
 
----
+## Rosbridge Inputs
 
-### Step 3：依序開啟 6 個 Terminal
+`quick_start/2_mast3r_slam.sh` subscribes to the robot-side ROS graph through rosbridge.
 
-所有腳本均位於 `/workspace/thor/quick_start/`。
+Default robot-facing inputs:
 
----
-
-#### Terminal 1 — IPC Bridge（ROS 容器）
-
-接收 locobot 相機的影像並轉發給 GPU 容器。
-
-```bash
-# 進入 ROS 容器
-docker exec -it mast3r_locobot_ros_humble bash
-source /workspace/thor/environment.sh 150
-cd /workspace/thor/quick_start
-source 1_ipc_bridge.sh
+```text
+ROBOT_ROSBRIDGE_HOST=192.168.0.213
+ROBOT_ROSBRIDGE_PORT=9090
+ROBOT_IMAGE_TOPIC=/locobot/camera/camera/color/image_raw/compressed
+ROBOT_CAMERA_INFO_TOPIC=/locobot/camera/camera/color/camera_info
+ROBOT_TF_TOPIC=/tf
+ROBOT_TF_STATIC_TOPIC=/locobot/tf_static_relay
 ```
 
----
+`ROBOT_TF_STATIC_TOPIC` is the remote rosbridge source topic. The MASt3R node republishes that TF locally with ROS remapping:
 
-#### Terminal 2 — MASt3R-SLAM（GPU 容器 ⚠️）
+```text
+/tf        -> /robot1/tf
+/tf_static -> /robot1/tf_static
+```
 
-> **注意：這個腳本必須在 GPU 容器裡執行！**
+This keeps robot1 TF isolated from robot2 when both pipelines run in the same ROS domain.
+
+## Start Order
+
+Run these inside the Thor container/workspace that has this repo mounted at `/workspace/thor`.
+
+### Terminal 1: MASt3R-SLAM
 
 ```bash
-# 進入 GPU 容器
-docker exec -it mast3r_locobot_algorithm bash
-source /workspace/thor/environment.sh 150
 cd /workspace/thor/quick_start
 source 2_mast3r_slam.sh
 ```
 
----
-
-#### Terminal 3 — IPC Pointcloud Receiver（ROS 容器）
-
-從 GPU 容器的 Unix Socket 接收點雲，發布到 ROS topic `/mast3r/frame_pointcloud`。
+Useful overrides:
 
 ```bash
-docker exec -it mast3r_locobot_ros_humble bash
-source /workspace/thor/environment.sh 150
-cd /workspace/thor/quick_start
-source 3_ipc_receiver.sh
+source 2_mast3r_slam.sh --ip 192.168.0.213 --no-viz
+source 2_mast3r_slam.sh --dds
+source 2_mast3r_slam.sh --use-calib
 ```
 
----
-
-#### Terminal 4 — Auto Anchor（ROS 容器）
-
-接收第一筆點雲後，建立 `locobot/odom → mast3r_map` 的靜態 TF，作為整個地圖的坐標系錨點。
+### Terminal 2: Auto Anchor
 
 ```bash
-docker exec -it mast3r_locobot_ros_humble bash
-source /workspace/thor/environment.sh 150
 cd /workspace/thor/quick_start
 source 4_auto_anchor.sh
 ```
 
----
+This waits for `/robot1/mast3r/frame_pointcloud`, looks up:
 
-#### Terminal 5 — PC2 to Map（ROS 容器）
+```text
+locobot/odom -> locobot/camera_color_optical_frame
+```
 
-將點雲從 `mast3r_map` 座標轉換到 `locobot/odom`，附加位姿資訊後發布至 `/mast3r/pointcloud_in_map`。
+and publishes:
+
+```text
+locobot/odom -> robot1/mast3r_map
+```
+
+through `/robot1/tf_static`.
+
+### Terminal 3: PointCloud To Map
 
 ```bash
-docker exec -it mast3r_locobot_ros_humble bash
-source /workspace/thor/environment.sh 150
 cd /workspace/thor/quick_start
 source 5_pc2_to_map.sh
 ```
 
----
-
-#### Terminal 6 — Rosbridge（ROS 容器）
-
-啟動 WebSocket server，Unity 透過此橋接訂閱點雲 topic。
-
-```bash
-docker exec -it mast3r_locobot_ros_humble bash
-source /workspace/thor/environment.sh 150
-cd /workspace/thor/quick_start
-source 6_rosbridge.sh
-```
-
----
-
-## 📡 資料流
+This subscribes to:
 
 ```text
-Locobot 相機
-    │ ROS2 image topic
-    ▼
-[Terminal 1] ipc_bridge_node (ROS 容器)
-    │ Unix Domain Socket (IPC)
-    ▼
-[Terminal 2] MASt3R-SLAM (GPU 容器)  ← 演算法在這裡跑
-    │ Unix Domain Socket (IPC)
-    ▼
-[Terminal 3] ipc_pointcloud_receiver → /mast3r/frame_pointcloud
-    │
-[Terminal 4] auto_anchor  (建立 locobot/odom → mast3r_map TF)
-    │
-[Terminal 5] pc2_to_map  → /mast3r/pointcloud_in_map
-    │ WebSocket (rosbridge)
-    ▼
-Unity (PointCloudAccumulatorGPU_Anchored_IBGR.cs)
+/robot1/mast3r/frame_pointcloud
+/robot1/tf
+/robot1/tf_static
 ```
 
----
+and publishes:
 
-## ⚙️ Unity 設定
+```text
+/robot1/mast3r/pointcloud_in_map
+```
 
-- Unity 訂閱 topic：`/mast3r/pointcloud_in_map`
-- Rosbridge WebSocket 位址：`ws://<Thor IP>:9091`
-- 使用腳本：`PointCloudAccumulatorGPU_Anchored_IBGR.cs`
+## Multi-Robot Notes
+
+When LoCoBot and Stretch3 run in the same ROS domain:
+
+```text
+robot1 outputs:
+  /robot1/mast3r/frame_pointcloud
+  /robot1/mast3r/pointcloud_in_map
+  /robot1/tf
+  /robot1/tf_static
+
+robot2 outputs:
+  /robot2/mast3r/frame_pointcloud
+  /robot2/mast3r/pointcloud_in_map
+  /robot2/tf
+  /robot2/tf_static
+```
+
+The local topic namespace separates transport. The TF frame prefixes from the robot-side relay separate frame names.
