@@ -26,6 +26,10 @@ setup(
             "auto_anchor_from_pointcloud_stretch3 = stretch3_ros_nodes.auto_anchor_from_pointcloud_stretch3:main",
             "pc2_to_map_stretch3 = stretch3_ros_nodes.pc2_to_map_stretch3:main",
             "multi_robot_fusion_node = stretch3_ros_nodes.multi_robot_fusion_node:main",
+            "multi_robot_backend_node = stretch3_ros_nodes.multi_robot_backend_node:main",
+            "multi_robot_geometric_verifier_node = stretch3_ros_nodes.multi_robot_geometric_verifier_node:main",
+            "multi_robot_pgo_node = stretch3_ros_nodes.multi_robot_pgo_node:main",
+            "multi_robot_optimized_map_node = stretch3_ros_nodes.multi_robot_optimized_map_node:main",
         ],
     },
 )

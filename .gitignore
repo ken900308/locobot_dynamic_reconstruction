@@ -7,4 +7,4 @@
 
 .github/
 
-thor/ros2_ws/src/stretch3_ros_nodes/stretch3_ros_nodes/
+thor/ros2_ws/src/stretch3_ros_nodes/stretch3_ros_nodes/__pycache__/*

@@ -64,6 +64,7 @@ from mast3r_slam.evaluate import save_reconstruction
 from mast3r_slam.config import load_config, config
 from mast3r_slam.dataloader import Intrinsics
 from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
+from mast3r_slam.keyframe_metadata_exporter import KeyframeMetadataExporter
 from mast3r_slam.mast3r_utils import load_mast3r, mast3r_inference_mono
 from mast3r_slam.multiprocess_utils import new_queue, try_get_msg
 from mast3r_slam.tracker import FrameTracker
@@ -457,6 +458,7 @@ class MASt3RSLAMVisualizationNode(Node):
         self.ipc_receiver = None
         self.ipc_pointcloud_socket = os.environ.get('IPC_POINTCLOUD_SOCKET', f'/tmp/ipc_socket/{self.robot_id}/mast3r_pointcloud.sock')
         self.ipc_pointcloud_sender = None
+        self.keyframe_metadata_exporter = None
         
         # 改進 1: 使用短 FIFO (deque) 取代深 queue
         # maxlen=3 確保只保留最近的 3 張影像，避免延遲堆積
@@ -583,6 +585,7 @@ class MASt3RSLAMVisualizationNode(Node):
             )
             self.get_logger().info(f"🎯 Frame PointCloud publisher: {self.frame_pointcloud_topic}")
             self.get_logger().info(f"🎯 Full Map direct publisher:  {self.fullmap_pointcloud_topic} (bypass pc2_to_map)")
+            self.keyframe_metadata_exporter = KeyframeMetadataExporter(self, self.robot_id)
         else:
             self.ipc_pointcloud_sender = UDSPointCloudSender(self.ipc_pointcloud_socket, self.get_logger())
         self.min_confidence_threshold = 0.95  # 置信度過濾閾值
@@ -1343,6 +1346,8 @@ class MASt3RSLAMVisualizationNode(Node):
                 
                 # 發布
                 self.frame_pc_publisher.publish(msg)
+                if self.keyframe_metadata_exporter is not None:
+                    self.keyframe_metadata_exporter.publish(keyframe)
                 self.pc_publish_count += 1
                 now = time.time()
                 if now - self.pc_last_log_time >= 1.0:

@@ -1,0 +1,78 @@
+#!/bin/bash
+set -euo pipefail
+
+source_ros_setup() {
+    set +u
+    source /opt/ros/jazzy/setup.bash
+    if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then
+        source /workspace/thor/ros2_ws/install/setup.bash
+    fi
+    set -u
+}
+
+echo "Starting Multi-Robot Sim(3) PGO Node..."
+source_ros_setup
+
+ROBOT_IDS=${ROBOT_IDS:-robot1,robot2}
+ANCHOR_ROBOT=${ANCHOR_ROBOT:-}
+METADATA_TOPIC_TEMPLATE=${METADATA_TOPIC_TEMPLATE:-}
+if [ -z "$METADATA_TOPIC_TEMPLATE" ]; then
+    METADATA_TOPIC_TEMPLATE='/{robot_id}/mast3r/keyframe_metadata'
+fi
+POSE_CONSTRAINT_TOPIC=${POSE_CONSTRAINT_TOPIC:-/multi_robot/pose_constraints}
+ROBOT_ALIGNMENTS_TOPIC=${ROBOT_ALIGNMENTS_TOPIC:-/multi_robot/robot_alignments}
+OPTIMIZED_POSE_TOPIC=${OPTIMIZED_POSE_TOPIC:-/multi_robot/optimized_keyframe_poses}
+OPTIMIZED_POSE_TOPIC_TEMPLATE=${OPTIMIZED_POSE_TOPIC_TEMPLATE:-}
+if [ -z "$OPTIMIZED_POSE_TOPIC_TEMPLATE" ]; then
+    OPTIMIZED_POSE_TOPIC_TEMPLATE='/{robot_id}/mast3r/keyframe_pose_optimized'
+fi
+PGO_SUMMARY_TOPIC=${PGO_SUMMARY_TOPIC:-/multi_robot/pgo_summaries}
+MIN_CONSTRAINT_CONFIDENCE=${MIN_CONSTRAINT_CONFIDENCE:-0.0}
+MAX_CONSTRAINT_RMSE_M=${MAX_CONSTRAINT_RMSE_M:-0.20}
+MIN_CONSTRAINT_INLIERS=${MIN_CONSTRAINT_INLIERS:-12}
+MAX_ALIGNMENT_TRANSLATION_RESIDUAL_M=${MAX_ALIGNMENT_TRANSLATION_RESIDUAL_M:-1.0}
+MAX_ALIGNMENT_ROTATION_RESIDUAL_DEG=${MAX_ALIGNMENT_ROTATION_RESIDUAL_DEG:-30.0}
+MAX_ALIGNMENT_LOG_SCALE_RESIDUAL=${MAX_ALIGNMENT_LOG_SCALE_RESIDUAL:-0.25}
+MIN_PAIR_OBSERVATIONS_FOR_ROBUST=${MIN_PAIR_OBSERVATIONS_FOR_ROBUST:-3}
+PUBLISH_ALL_ON_UPDATE=${PUBLISH_ALL_ON_UPDATE:-true}
+
+echo "  ROBOT_IDS: $ROBOT_IDS"
+echo "  ANCHOR_ROBOT: $ANCHOR_ROBOT"
+echo "  METADATA_TOPIC_TEMPLATE: $METADATA_TOPIC_TEMPLATE"
+echo "  POSE_CONSTRAINT_TOPIC: $POSE_CONSTRAINT_TOPIC"
+echo "  ROBOT_ALIGNMENTS_TOPIC: $ROBOT_ALIGNMENTS_TOPIC"
+echo "  OPTIMIZED_POSE_TOPIC: $OPTIMIZED_POSE_TOPIC"
+echo "  OPTIMIZED_POSE_TOPIC_TEMPLATE: $OPTIMIZED_POSE_TOPIC_TEMPLATE"
+echo "  PGO_SUMMARY_TOPIC: $PGO_SUMMARY_TOPIC"
+echo "  MIN_CONSTRAINT_CONFIDENCE: $MIN_CONSTRAINT_CONFIDENCE"
+echo "  MAX_CONSTRAINT_RMSE_M: $MAX_CONSTRAINT_RMSE_M"
+echo "  MIN_CONSTRAINT_INLIERS: $MIN_CONSTRAINT_INLIERS"
+echo "  MAX_ALIGNMENT_TRANSLATION_RESIDUAL_M: $MAX_ALIGNMENT_TRANSLATION_RESIDUAL_M"
+echo "  MAX_ALIGNMENT_ROTATION_RESIDUAL_DEG: $MAX_ALIGNMENT_ROTATION_RESIDUAL_DEG"
+echo "  MAX_ALIGNMENT_LOG_SCALE_RESIDUAL: $MAX_ALIGNMENT_LOG_SCALE_RESIDUAL"
+echo "  MIN_PAIR_OBSERVATIONS_FOR_ROBUST: $MIN_PAIR_OBSERVATIONS_FOR_ROBUST"
+echo "  PUBLISH_ALL_ON_UPDATE: $PUBLISH_ALL_ON_UPDATE"
+
+ROS_ARGS=(
+    -p robot_ids:="$ROBOT_IDS"
+    -p metadata_topic_template:="$METADATA_TOPIC_TEMPLATE"
+    -p pose_constraint_topic:="$POSE_CONSTRAINT_TOPIC"
+    -p robot_alignments_topic:="$ROBOT_ALIGNMENTS_TOPIC"
+    -p optimized_pose_topic:="$OPTIMIZED_POSE_TOPIC"
+    -p optimized_pose_topic_template:="$OPTIMIZED_POSE_TOPIC_TEMPLATE"
+    -p pgo_summary_topic:="$PGO_SUMMARY_TOPIC"
+    -p min_constraint_confidence:="$MIN_CONSTRAINT_CONFIDENCE"
+    -p max_constraint_rmse_m:="$MAX_CONSTRAINT_RMSE_M"
+    -p min_constraint_inliers:="$MIN_CONSTRAINT_INLIERS"
+    -p max_alignment_translation_residual_m:="$MAX_ALIGNMENT_TRANSLATION_RESIDUAL_M"
+    -p max_alignment_rotation_residual_deg:="$MAX_ALIGNMENT_ROTATION_RESIDUAL_DEG"
+    -p max_alignment_log_scale_residual:="$MAX_ALIGNMENT_LOG_SCALE_RESIDUAL"
+    -p min_pair_observations_for_robust:="$MIN_PAIR_OBSERVATIONS_FOR_ROBUST"
+    -p publish_all_on_update:="$PUBLISH_ALL_ON_UPDATE"
+)
+
+if [ -n "$ANCHOR_ROBOT" ]; then
+    ROS_ARGS+=(-p anchor_robot:="$ANCHOR_ROBOT")
+fi
+
+ros2 run stretch3_ros_nodes multi_robot_pgo_node --ros-args "${ROS_ARGS[@]}"

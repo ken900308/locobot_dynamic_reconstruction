@@ -16,7 +16,7 @@ x-common-settings: &common
     - /etc/localtime:/etc/localtime:ro
 
     # Mount entire project directory
-    - /home/hrc/Desktop/projects/locobot_jazzy:/workspace:rw
+    - ..:/workspace:rw
 
     # udev rules for RealSense
     - /etc/udev/rules.d:/etc/udev/rules.d:ro
