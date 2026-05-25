@@ -66,7 +66,8 @@ def keyframe_to_metadata(robot_id: str, keyframe: Any) -> Dict[str, Any]:
 
     confidence_mean = None
     if getattr(keyframe, "C", None) is not None:
-        confidence_mean = float(keyframe.C.detach().float().mean().cpu())
+        confidence = _keyframe_average_confidence(keyframe)
+        confidence_mean = float(confidence.detach().float().mean().cpu())
 
     image = _uimg_to_rgb8(getattr(keyframe, "uimg", None))
     image_shape = None
@@ -83,9 +84,22 @@ def keyframe_to_metadata(robot_id: str, keyframe: Any) -> Dict[str, Any]:
         "descriptor": descriptor,
         "descriptor_type": "mast3r_feat_mean_l2_v1",
         "confidence_mean": confidence_mean,
+        "confidence_type": "mast3r_average_confidence_C_over_N_v1",
+        "pointmap_updates": int(getattr(keyframe, "N", 1) or 1),
         "num_points": int(keyframe.X_canon.shape[0]) if getattr(keyframe, "X_canon", None) is not None else 0,
         "image_shape": image_shape,
     }
+
+
+def _keyframe_average_confidence(keyframe: Any) -> torch.Tensor:
+    if hasattr(keyframe, "get_average_conf"):
+        confidence = keyframe.get_average_conf()
+        if confidence is not None:
+            return confidence
+
+    confidence = keyframe.C
+    updates = max(1, int(getattr(keyframe, "N", 1) or 1))
+    return confidence / updates
 
 
 class KeyframeMetadataExporter:
@@ -108,7 +122,7 @@ class KeyframeMetadataExporter:
             "MAST3R_KEYFRAME_IMAGE_TOPIC",
             f"/{robot_id}/mast3r/keyframe_image",
         )
-        self.cloud_max_points = int(os.environ.get("MAST3R_KEYFRAME_LOCAL_CLOUD_MAX_POINTS", "60000"))
+        self.cloud_max_points = int(os.environ.get("MAST3R_KEYFRAME_LOCAL_CLOUD_MAX_POINTS", "0"))
         self.cloud_min_confidence = float(os.environ.get("MAST3R_KEYFRAME_LOCAL_CLOUD_MIN_CONFIDENCE", "0.0"))
 
         if not self.enabled:
@@ -165,7 +179,7 @@ class KeyframeMetadataExporter:
             return
 
         points = keyframe.X_canon.detach().cpu()
-        confidence = keyframe.C.detach().cpu().reshape(-1)
+        confidence = _keyframe_average_confidence(keyframe).detach().cpu().reshape(-1)
         valid = confidence >= self.cloud_min_confidence
         if int(valid.sum()) == 0:
             return

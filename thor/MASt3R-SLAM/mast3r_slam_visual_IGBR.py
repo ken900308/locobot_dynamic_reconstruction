@@ -520,6 +520,10 @@ class MASt3RSLAMVisualizationNode(Node):
                 self._static_tf_cache = {}
                 self._rosbridge_tf_count = 0
                 self._rosbridge_tf_static_count = 0
+                self._rosbridge_image_received_count = 0
+                self._rosbridge_image_overwrite_count = 0
+                self._last_rosbridge_image_stamp = None
+                self._last_rosbridge_image_wall_time = None
                 self._last_tf_log_time = 0
                 self._rosbridge_queue_lock = threading.Lock()
                 self._rosbridge_camera_info_queue_lock = threading.Lock()
@@ -592,6 +596,8 @@ class MASt3RSLAMVisualizationNode(Node):
         self.pc_publish_count = 0
         self.pc_last_log_time = time.time()
         self.loop_closure_count = 0  # [新增] 紀錄 PGO 觸發全域重繪的次數
+        self.mast3r_stage_fps_ema = 0.0
+        self.mast3r_stage_fps_alpha = 0.1
 
         self.get_logger().info(f"MASt3R-SLAM Node with Visualization initialized")
         self.get_logger().info(f"Subscribing to: {self.image_topic}")
@@ -705,9 +711,7 @@ class MASt3RSLAMVisualizationNode(Node):
                 image_topic = image_topic + '/compressed'
 
             self.rosbridge_listener = roslibpy.Topic(self.ros_client, image_topic, image_type)
-            self.rosbridge_listener.subscribe(
-                lambda msg: self._queue_rosbridge_msg(self._rosbridge_queue_lock, self._rosbridge_image_queue, msg)
-            )
+            self.rosbridge_listener.subscribe(self._queue_latest_rosbridge_image_msg)
             self.get_logger().info(f"Subscribed to {image_topic} via rosbridge")
 
             self.rosbridge_camera_info_listener = roslibpy.Topic(
@@ -765,11 +769,24 @@ class MASt3RSLAMVisualizationNode(Node):
         with lock:
             queue.append(msg)
 
-    def poll_rosbridge_queue(self):
+    def _queue_latest_rosbridge_image_msg(self, msg):
+        # Keep only the latest robot image. Processing old images creates visible lag
+        # and can make keyframe updates appear minutes late when SLAM is slower than the camera stream.
         with self._rosbridge_queue_lock:
             if self._rosbridge_image_queue:
-                msg = self._rosbridge_image_queue.pop(0)
-                self.process_rosbridge_image(msg)
+                self._rosbridge_image_overwrite_count += len(self._rosbridge_image_queue)
+                self._rosbridge_image_queue.clear()
+            self._rosbridge_image_queue.append(msg)
+            self._rosbridge_image_received_count += 1
+
+    def poll_rosbridge_queue(self):
+        image_msg = None
+        with self._rosbridge_queue_lock:
+            if self._rosbridge_image_queue:
+                image_msg = self._rosbridge_image_queue[-1]
+                self._rosbridge_image_queue.clear()
+        if image_msg is not None:
+            self.process_rosbridge_image(image_msg)
 
         with self._rosbridge_camera_info_queue_lock:
             if self._rosbridge_camera_info_queue:
@@ -923,6 +940,9 @@ class MASt3RSLAMVisualizationNode(Node):
             timestamp = sec + nanosec * 1e-9
             if timestamp == 0:
                 timestamp = time.time()
+
+            self._last_rosbridge_image_stamp = timestamp
+            self._last_rosbridge_image_wall_time = time.time()
 
             with self.buffer_lock:
                 old_size = len(self.image_buffer)
@@ -1693,7 +1713,9 @@ class MASt3RSLAMVisualizationNode(Node):
                 # Process based on current mode
                 if mode == Mode.INIT:
                     self.get_logger().info("🔧 Initializing SLAM with first frame...")
+                    mast3r_stage_start = time.perf_counter()
                     X_init, C_init = mast3r_inference_mono(self.model, frame)
+                    self.record_mast3r_stage_timing(time.perf_counter() - mast3r_stage_start)
                     frame.update_pointmap(X_init, C_init)
                     
                     with self.keyframes_lock:
@@ -1715,7 +1737,9 @@ class MASt3RSLAMVisualizationNode(Node):
 
                 add_new_kf = False
                 if mode == Mode.TRACKING:
+                    mast3r_stage_start = time.perf_counter()
                     add_new_kf, match_info, try_reloc = self.tracker.track(frame)
+                    self.record_mast3r_stage_timing(time.perf_counter() - mast3r_stage_start)
                     if try_reloc:
                         with self.states_lock:
                             self.states.set_mode(Mode.RELOC)
@@ -1724,7 +1748,9 @@ class MASt3RSLAMVisualizationNode(Node):
                         self.states.set_frame(frame)
 
                 elif mode == Mode.RELOC:
+                    mast3r_stage_start = time.perf_counter()
                     X, C = mast3r_inference_mono(self.model, frame)
+                    self.record_mast3r_stage_timing(time.perf_counter() - mast3r_stage_start)
                     frame.update_pointmap(X, C)
                     with self.states_lock:
                         self.states.set_frame(frame)
@@ -1931,6 +1957,16 @@ class MASt3RSLAMVisualizationNode(Node):
     #         except:
     #             pass  # 鎖可能已經被釋放
     
+    def record_mast3r_stage_timing(self, elapsed_sec):
+        if elapsed_sec <= 0.0:
+            return
+        fps = 1.0 / elapsed_sec
+        if self.mast3r_stage_fps_ema <= 0.0:
+            self.mast3r_stage_fps_ema = fps
+        else:
+            alpha = self.mast3r_stage_fps_alpha
+            self.mast3r_stage_fps_ema = alpha * fps + (1.0 - alpha) * self.mast3r_stage_fps_ema
+
     def print_stats(self):
         """Print enhanced processing statistics"""
         if self.image_count > 0:
@@ -1945,17 +1981,32 @@ class MASt3RSLAMVisualizationNode(Node):
             
             time_since_last_save = time.time() - self.last_save_time if self.last_save_time > 0 else 0
             
-            # 計算有效 FPS（實際處理速度）
-            elapsed_time = time.time() - self.start_time
-            effective_fps = self.processed_count / elapsed_time if elapsed_time > 0 else 0
+            mast3r_fps = self.mast3r_stage_fps_ema
+            rosbridge_diag = ""
+            if getattr(self, "use_rosbridge", False):
+                with self._rosbridge_queue_lock:
+                    rosbridge_queue_len = len(self._rosbridge_image_queue)
+                image_age = -1.0
+                wall_lag = -1.0
+                if self._last_rosbridge_image_stamp is not None:
+                    image_age = time.time() - float(self._last_rosbridge_image_stamp)
+                if self._last_rosbridge_image_wall_time is not None:
+                    wall_lag = time.time() - float(self._last_rosbridge_image_wall_time)
+                rosbridge_diag = (
+                    f", rosbridge_rx={self._rosbridge_image_received_count}, "
+                    f"rosbridge_overwritten={self._rosbridge_image_overwrite_count}, "
+                    f"rosbridge_q={rosbridge_queue_len}, image_age={image_age:.2f}s, "
+                    f"wall_lag={wall_lag:.2f}s"
+                )
             
             self.get_logger().info(
                 f"📈 Stats: {self.image_count} images received, "
                 f"{self.processed_count} processed ({processing_ratio:.1f}%), "
                 f"{self.dropped_count} dropped ({drop_ratio:.1f}%), "
                 f"{keyframe_count} keyframes, "
-                f"Effective FPS: {effective_fps:.2f}, "
+                f"MASt3R FPS: {mast3r_fps:.2f}, "
                 f"Last save: {time_since_last_save:.1f}s ago"
+                f"{rosbridge_diag}"
             )
     
     def cleanup_processes(self):

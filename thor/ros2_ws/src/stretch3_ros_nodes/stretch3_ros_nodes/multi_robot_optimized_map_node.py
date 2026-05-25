@@ -39,10 +39,11 @@ class MultiRobotOptimizedMapNode(Node):
         self.declare_parameter("output_frame", "multi_robot_optimized_map")
         self.declare_parameter("max_points_per_keyframe", 30000)
         self.declare_parameter("max_merged_points", 300000)
-        self.declare_parameter("min_cloud_confidence", 0.0)
+        self.declare_parameter("min_cloud_confidence", 0.95)
         self.declare_parameter("voxel_leaf_size_per_keyframe", 0.0)
         self.declare_parameter("voxel_leaf_size_merged", 0.0)
         self.declare_parameter("publish_merged_period_sec", 1.0)
+        self.declare_parameter("publish_only_on_revision_change", True)
 
         robot_ids_text = self.get_parameter("robot_ids").get_parameter_value().string_value
         self.robot_ids = _parse_csv(robot_ids_text) or ["robot1", "robot2"]
@@ -59,6 +60,9 @@ class MultiRobotOptimizedMapNode(Node):
         self.voxel_leaf_size_per_keyframe = self.get_parameter("voxel_leaf_size_per_keyframe").get_parameter_value().double_value
         self.voxel_leaf_size_merged = self.get_parameter("voxel_leaf_size_merged").get_parameter_value().double_value
         publish_period = self.get_parameter("publish_merged_period_sec").get_parameter_value().double_value
+        self.publish_only_on_revision_change = self.get_parameter(
+            "publish_only_on_revision_change"
+        ).get_parameter_value().bool_value
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -69,6 +73,7 @@ class MultiRobotOptimizedMapNode(Node):
         self.transformed = {}
         self.key_revisions = {}
         self.map_revision = 0
+        self.last_published_map_revision = -1
         self.keyframe_cloud_pub = self.create_publisher(PointCloud2, keyframe_cloud_topic, qos)
         self.keyframe_summary_pub = self.create_publisher(String, keyframe_summary_topic, qos)
         self.map_pub = self.create_publisher(PointCloud2, map_topic, qos)
@@ -92,7 +97,8 @@ class MultiRobotOptimizedMapNode(Node):
         self.get_logger().info(
             f"Publishing optimized keyframe clouds on {keyframe_cloud_topic}; summaries on {keyframe_summary_topic}; "
             f"merged map on {map_topic}; map summaries on {map_summary_topic}; frame={self.output_frame}; "
-            f"voxel_keyframe={self.voxel_leaf_size_per_keyframe}, voxel_merged={self.voxel_leaf_size_merged}"
+            f"voxel_keyframe={self.voxel_leaf_size_per_keyframe}, voxel_merged={self.voxel_leaf_size_merged}, "
+            f"publish_only_on_revision_change={self.publish_only_on_revision_change}"
         )
 
     def _format_topic(self, template: str, robot_id: str, parameter_name: str) -> str:
@@ -162,6 +168,8 @@ class MultiRobotOptimizedMapNode(Node):
     def publish_merged_map(self) -> None:
         if not self.transformed:
             return
+        if self.publish_only_on_revision_change and self.map_revision == self.last_published_map_revision:
+            return
         msg = merge_transformed_clouds(
             list(self.transformed.values()),
             self.output_frame,
@@ -172,6 +180,7 @@ class MultiRobotOptimizedMapNode(Node):
         if msg is None:
             return
         self.map_pub.publish(msg)
+        self.last_published_map_revision = self.map_revision
         summary = String()
         point_count = int(msg.width) * int(msg.height)
         summary.data = make_optimized_map_summary(
