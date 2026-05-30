@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from functools import partial
+from types import SimpleNamespace
 import json
 import time
 
@@ -10,7 +11,7 @@ from std_msgs.msg import String
 
 from stretch3_ros_nodes.cross_robot_keyframe_index import CrossRobotKeyframeIndex
 from stretch3_ros_nodes.cross_robot_native_cache import manifest_from_metadata_json, validate_native_cache_manifest
-from stretch3_ros_nodes.native_frame_cache import load_frame_record, record_to_frame
+from stretch3_ros_nodes.native_frame_cache import load_frame_record
 from stretch3_ros_nodes.native_imports import configure_mast3r_imports
 from stretch3_ros_nodes.native_messages import dumps
 
@@ -88,8 +89,17 @@ class MultiRobotNativeRetrievalNode(Node):
             # Native FactorGraph pins the lowest sorted keyframe index. Use deterministic
             # robot-order offsets so anchor robot keyframes sort before other robots.
             global_index = self.robot_order.get(manifest.robot_id, len(self.robot_order)) * 1000000 + int(manifest.kf_id)
-            record = load_frame_record(manifest, global_index, self.device)
-            frame = record_to_frame(record)
+            # RetrievalDatabase.update only needs frame.feat. Keep X_canon/C/img/uimg
+            # out of this process so the DB metadata does not pin full keyframes.
+            record = load_frame_record(manifest, global_index, self.device, tensor_keys=("feat",))
+            frame = SimpleNamespace(feat=record.payload["feat"])
+            query_ref = SimpleNamespace(
+                robot_id=record.robot_id,
+                kf_id=record.kf_id,
+                keyframe_uid=record.keyframe_uid,
+                global_index=record.global_index,
+                cache_path=record.cache_path,
+            )
         except Exception as exc:
             self.get_logger().warn(f"Rejected native retrieval keyframe: {exc}")
             return
@@ -105,7 +115,7 @@ class MultiRobotNativeRetrievalNode(Node):
         candidates = []
         for db_id in inds:
             other = self.records_by_db_id.get(int(db_id))
-            if other is None or other.robot_id == record.robot_id:
+            if other is None or other.robot_id == query_ref.robot_id:
                 continue
             candidates.append(other)
             if len(candidates) >= self.top_k:
@@ -113,7 +123,7 @@ class MultiRobotNativeRetrievalNode(Node):
         # Add after querying, mirroring native MASt3R-SLAM retrieval semantics.
         try:
             self.retriever.update(frame, add_after_query=True, k=query_k, min_thresh=self.min_thresh)
-            self.records_by_db_id[int(self.retriever.kf_counter) - 1] = record
+            self.records_by_db_id[int(self.retriever.kf_counter) - 1] = query_ref
         except Exception as exc:
             self.get_logger().warn(f"Failed to add {manifest.keyframe_uid} to retrieval DB: {exc}")
             return
@@ -121,11 +131,11 @@ class MultiRobotNativeRetrievalNode(Node):
         for rank, other in enumerate(candidates):
             payload = {
                 "schema": "multi_robot_native_retrieval_candidate_v1",
-                "query_robot": record.robot_id,
-                "query_kf_id": record.kf_id,
-                "query_uid": record.keyframe_uid,
-                "query_global_idx": record.global_index,
-                "query_cache_path": record.cache_path,
+                "query_robot": query_ref.robot_id,
+                "query_kf_id": query_ref.kf_id,
+                "query_uid": query_ref.keyframe_uid,
+                "query_global_idx": query_ref.global_index,
+                "query_cache_path": query_ref.cache_path,
                 "match_robot": other.robot_id,
                 "match_kf_id": other.kf_id,
                 "match_uid": other.keyframe_uid,
@@ -140,7 +150,7 @@ class MultiRobotNativeRetrievalNode(Node):
 
         summary = {
             "schema": "multi_robot_native_retrieval_summary_v1",
-            "query_uid": record.keyframe_uid,
+            "query_uid": query_ref.keyframe_uid,
             "database_size": database_size,
             "top_k": self.top_k,
             "min_thresh": self.min_thresh,
@@ -150,7 +160,7 @@ class MultiRobotNativeRetrievalNode(Node):
         }
         out = String(); out.data = dumps(summary); self.summary_pub.publish(out)
         self.get_logger().info(
-            f"Native retrieval query={record.keyframe_uid} database_size={database_size} top_k={self.top_k} "
+            f"Native retrieval query={query_ref.keyframe_uid} database_size={database_size} top_k={self.top_k} "
             f"min_thresh={self.min_thresh} candidate_count={len(candidates)}"
         )
 

@@ -29,11 +29,32 @@ def _to_device_tensor(value, device: str):
     return value.to(device=device) if hasattr(value, "to") else torch.as_tensor(value, device=device)
 
 
-def load_frame_record(manifest: NativeKeyframeManifest, global_index: int, device: str = "cuda:0") -> NativeFrameRecord:
+DEFAULT_TENSOR_KEYS = (
+    "sim3_data",
+    "img",
+    "img_shape",
+    "img_true_shape",
+    "X_canon",
+    "C",
+    "feat",
+    "pos",
+    "K",
+)
+
+
+def load_frame_record(
+    manifest: NativeKeyframeManifest,
+    global_index: int,
+    device: str = "cuda:0",
+    tensor_keys: tuple[str, ...] | None = None,
+) -> NativeFrameRecord:
     record = load_native_keyframe_cache(manifest, map_location="cpu")
     payload = dict(record.payload)
-    for key in ("sim3_data", "img", "img_shape", "img_true_shape", "X_canon", "C", "feat", "pos", "K"):
+    selected = tensor_keys or DEFAULT_TENSOR_KEYS
+    for key in selected:
         payload[key] = _to_device_tensor(payload.get(key), device)
+    for key in set(DEFAULT_TENSOR_KEYS) - set(selected):
+        payload.pop(key, None)
     # uimg is kept on CPU because native Frame stores colors on CPU.
     return NativeFrameRecord(
         robot_id=manifest.robot_id,
@@ -52,16 +73,16 @@ def record_to_frame(record: NativeFrameRecord):
     p = record.payload
     frame = Frame(
         int(record.kf_id),
-        p["img"],
-        p["img_shape"],
-        p["img_true_shape"],
+        p.get("img"),
+        p.get("img_shape"),
+        p.get("img_true_shape"),
         p.get("uimg"),
         lietorch.Sim3(p["sim3_data"]),
     )
-    frame.X_canon = p["X_canon"]
-    frame.C = p["C"]
-    frame.feat = p["feat"]
-    frame.pos = p["pos"]
+    frame.X_canon = p.get("X_canon")
+    frame.C = p.get("C")
+    frame.feat = p.get("feat")
+    frame.pos = p.get("pos")
     frame.N = int(p.get("N", 1) or 1)
     frame.N_updates = int(p.get("N_updates", 0) or 0)
     frame.K = p.get("K")

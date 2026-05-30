@@ -66,7 +66,10 @@ class MultiRobotNativeOptimizerNode(Node):
         if self.frames.has(idx):
             return
         manifest = NativeKeyframeManifest(metadata[f"{prefix}_robot"], int(metadata[f"{prefix}_kf_id"]), metadata[f"{prefix}_uid"], metadata[f"{prefix}_cache_path"], "mast3r_native_keyframe_cache_v1", {})
-        self.frames.upsert(load_frame_record(manifest, idx, self.device))
+        tensor_keys = ("sim3_data", "X_canon", "C")
+        if self.use_calib:
+            tensor_keys = ("sim3_data", "img", "X_canon", "C", "K")
+        self.frames.upsert(load_frame_record(manifest, idx, self.device, tensor_keys=tensor_keys))
 
     def on_edge(self, msg: String) -> None:
         self._ensure_loaded()
