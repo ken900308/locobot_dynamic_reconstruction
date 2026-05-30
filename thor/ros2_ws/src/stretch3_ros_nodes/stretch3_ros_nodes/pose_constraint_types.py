@@ -12,6 +12,7 @@ def make_pose_constraint_json(
     inlier_count: int,
     rmse: float,
     confidence: float,
+    verifier_backend: str = "",
 ) -> str:
     payload: Dict[str, Any] = {
         "schema": "inter_robot_sim3_constraint_v1",
@@ -28,7 +29,9 @@ def make_pose_constraint_json(
         "match_count": int(match_count),
         "correspondence_count": int(correspondence_count),
         "inlier_count": int(inlier_count),
+        "inlier_ratio": float(int(inlier_count) / max(1, int(correspondence_count))),
         "rmse_m": float(rmse),
         "confidence": float(confidence),
+        "verifier_backend": str(verifier_backend),
     }
     return json.dumps(payload, separators=(",", ":"))

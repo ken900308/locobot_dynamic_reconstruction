@@ -30,6 +30,11 @@ setup(
             "multi_robot_geometric_verifier_node = stretch3_ros_nodes.multi_robot_geometric_verifier_node:main",
             "multi_robot_pgo_node = stretch3_ros_nodes.multi_robot_pgo_node:main",
             "multi_robot_optimized_map_node = stretch3_ros_nodes.multi_robot_optimized_map_node:main",
+            "multi_robot_native_keyframe_node = stretch3_ros_nodes.multi_robot_native_keyframe_node:main",
+            "multi_robot_native_map_publisher_node = stretch3_ros_nodes.multi_robot_native_map_publisher_node:main",
+            "multi_robot_native_optimizer_node = stretch3_ros_nodes.multi_robot_native_optimizer_node:main",
+            "multi_robot_native_factor_builder_node = stretch3_ros_nodes.multi_robot_native_factor_builder_node:main",
+            "multi_robot_native_retrieval_node = stretch3_ros_nodes.multi_robot_native_retrieval_node:main",
         ],
     },
 )

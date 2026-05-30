@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 
+from mast3r_slam.native_keyframe_cache import NativeKeyframeCacheWriter
+
 try:
     from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
     from sensor_msgs.msg import Image, PointCloud2, PointField
@@ -124,6 +126,7 @@ class KeyframeMetadataExporter:
         )
         self.cloud_max_points = int(os.environ.get("MAST3R_KEYFRAME_LOCAL_CLOUD_MAX_POINTS", "0"))
         self.cloud_min_confidence = float(os.environ.get("MAST3R_KEYFRAME_LOCAL_CLOUD_MIN_CONFIDENCE", "0.0"))
+        self.native_cache = NativeKeyframeCacheWriter(robot_id)
 
         if not self.enabled:
             return
@@ -139,12 +142,17 @@ class KeyframeMetadataExporter:
         node.get_logger().info(f"Keyframe metadata publisher: {self.topic}")
         node.get_logger().info(f"Keyframe local cloud publisher: {self.cloud_topic}")
         node.get_logger().info(f"Keyframe image publisher: {self.image_topic}")
+        if self.native_cache.enabled:
+            node.get_logger().info(f"Native keyframe cache: {self.native_cache.cache_dir}")
 
     def publish(self, keyframe: Any) -> None:
         if self.publisher is None:
             return
 
         payload = keyframe_to_metadata(self.robot_id, keyframe)
+        cache_info = self.native_cache.write(keyframe)
+        if cache_info is not None:
+            payload.update(cache_info)
         payload["stamp"] = self.node.get_clock().now().nanoseconds
 
         msg = String()

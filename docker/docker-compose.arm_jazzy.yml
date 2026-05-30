@@ -18,6 +18,9 @@ x-common-settings: &common
     # Mount entire project directory
     - ..:/workspace:rw
 
+    # Shared native keyframe tensor cache for cross-robot MASt3R backend
+    - ../../shared_native_keyframe_cache:/workspace/shared_native_keyframe_cache:rw
+
     # udev rules for RealSense
     - /etc/udev/rules.d:/etc/udev/rules.d:ro
     - /run/udev:/run/udev:ro

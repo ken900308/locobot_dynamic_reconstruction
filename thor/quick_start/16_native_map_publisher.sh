@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+source_ros_setup(){ set +u; source /opt/ros/jazzy/setup.bash; [ -f /workspace/thor/ros_ws/install/setup.bash ] && source /workspace/thor/ros_ws/install/setup.bash; [ -f /workspace/thor/ros2_ws/install/setup.bash ] && source /workspace/thor/ros2_ws/install/setup.bash; set -u; }
+echo "Starting Native MASt3R Optimized Map Publisher Node..."; source_ros_setup
+OPTIMIZED_POSE_TOPIC=${OPTIMIZED_POSE_TOPIC:-/multi_robot/native_optimized_keyframe_poses}; OPTIMIZED_MAP_TOPIC=${OPTIMIZED_MAP_TOPIC:-/multi_robot/optimized_map_points}; OPTIMIZED_MAP_SUMMARY_TOPIC=${OPTIMIZED_MAP_SUMMARY_TOPIC:-/multi_robot/optimized_map_summaries}
+OUTPUT_FRAME=${OUTPUT_FRAME:-multi_robot_optimized_map}; MAST3R_SLAM_ROOT=${MAST3R_SLAM_ROOT:-/workspace/thor/MASt3R-SLAM}; MAST3R_DEVICE=${MAST3R_DEVICE:-cuda:0}
+MIN_CONFIDENCE=${MIN_CONFIDENCE:-0.95}; MAX_MERGED_POINTS=${MAX_MERGED_POINTS:-5000000}; VOXEL_LEAF_SIZE=${VOXEL_LEAF_SIZE:-0.0}; PUBLISH_PERIOD_SEC=${PUBLISH_PERIOD_SEC:-1.0}
+echo "  OPTIMIZED_POSE_TOPIC: $OPTIMIZED_POSE_TOPIC"; echo "  OPTIMIZED_MAP_TOPIC: $OPTIMIZED_MAP_TOPIC"; echo "  MIN_CONFIDENCE: $MIN_CONFIDENCE"; echo "  MAX_MERGED_POINTS: $MAX_MERGED_POINTS"
+ros2 run stretch3_ros_nodes multi_robot_native_map_publisher_node --ros-args   -p optimized_pose_topic:="$OPTIMIZED_POSE_TOPIC" -p optimized_map_topic:="$OPTIMIZED_MAP_TOPIC" -p optimized_map_summary_topic:="$OPTIMIZED_MAP_SUMMARY_TOPIC"   -p output_frame:="$OUTPUT_FRAME" -p mast3r_slam_root:="$MAST3R_SLAM_ROOT" -p device:="$MAST3R_DEVICE"   -p min_confidence:="$MIN_CONFIDENCE" -p max_merged_points:="$MAX_MERGED_POINTS" -p voxel_leaf_size:="$VOXEL_LEAF_SIZE" -p publish_period_sec:="$PUBLISH_PERIOD_SEC"

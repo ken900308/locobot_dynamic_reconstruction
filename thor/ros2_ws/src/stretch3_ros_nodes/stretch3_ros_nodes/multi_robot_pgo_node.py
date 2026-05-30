@@ -35,6 +35,9 @@ class MultiRobotPgoNode(Node):
         self.declare_parameter("min_constraint_confidence", 0.0)
         self.declare_parameter("max_constraint_rmse_m", 0.20)
         self.declare_parameter("min_constraint_inliers", 12)
+        self.declare_parameter("min_constraint_inlier_ratio", 0.55)
+        self.declare_parameter("max_constraints_per_keyframe", 1)
+        self.declare_parameter("min_used_constraints_per_pair", 2)
         self.declare_parameter("max_alignment_translation_residual_m", 1.0)
         self.declare_parameter("max_alignment_rotation_residual_deg", 30.0)
         self.declare_parameter("max_alignment_log_scale_residual", 0.25)
@@ -54,6 +57,15 @@ class MultiRobotPgoNode(Node):
         self.min_constraint_confidence = self.get_parameter("min_constraint_confidence").get_parameter_value().double_value
         self.max_constraint_rmse_m = self.get_parameter("max_constraint_rmse_m").get_parameter_value().double_value
         self.min_constraint_inliers = self.get_parameter("min_constraint_inliers").get_parameter_value().integer_value
+        self.min_constraint_inlier_ratio = self.get_parameter(
+            "min_constraint_inlier_ratio"
+        ).get_parameter_value().double_value
+        self.max_constraints_per_keyframe = self.get_parameter(
+            "max_constraints_per_keyframe"
+        ).get_parameter_value().integer_value
+        self.min_used_constraints_per_pair = self.get_parameter(
+            "min_used_constraints_per_pair"
+        ).get_parameter_value().integer_value
         self.max_alignment_translation_residual_m = self.get_parameter(
             "max_alignment_translation_residual_m"
         ).get_parameter_value().double_value
@@ -97,6 +109,9 @@ class MultiRobotPgoNode(Node):
         self.get_logger().info(
             f"Publishing robot alignments on {alignments_topic}; optimized poses on {optimized_topic}; "
             f"summary on {summary_topic}; anchor={self.anchor_robot}; "
+            f"min_inlier_ratio={self.min_constraint_inlier_ratio}, "
+            f"max_constraints_per_keyframe={self.max_constraints_per_keyframe}, "
+            f"min_used_constraints_per_pair={self.min_used_constraints_per_pair}, "
             f"robust_translation={self.max_alignment_translation_residual_m}m, "
             f"robust_rotation={self.max_alignment_rotation_residual_deg}deg"
         )
@@ -138,6 +153,9 @@ class MultiRobotPgoNode(Node):
                 min_confidence=self.min_constraint_confidence,
                 max_rmse_m=self.max_constraint_rmse_m,
                 min_inliers=self.min_constraint_inliers,
+                min_inlier_ratio=self.min_constraint_inlier_ratio,
+                max_constraints_per_keyframe=self.max_constraints_per_keyframe,
+                min_used_constraints_per_pair=self.min_used_constraints_per_pair,
                 max_alignment_translation_residual_m=self.max_alignment_translation_residual_m,
                 max_alignment_rotation_residual_deg=self.max_alignment_rotation_residual_deg,
                 max_alignment_log_scale_residual=self.max_alignment_log_scale_residual,

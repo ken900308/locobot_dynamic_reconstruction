@@ -19,6 +19,7 @@ class GeometricVerifierConfig:
     ransac_iterations: int
     ransac_inlier_threshold_m: float
     max_rmse_m: float
+    min_inlier_ratio: float
     min_cloud_confidence: float
 
 
@@ -75,6 +76,10 @@ def estimate_geometric_constraint(
         raise Sim3EstimationError(f"Sim(3) RMSE is too high: {sim3.rmse:.4f} m")
 
     inlier_ratio = sim3.inlier_count / max(1, correspondence_count)
+    if inlier_ratio < config.min_inlier_ratio:
+        raise Sim3EstimationError(
+            f"Sim(3) inlier ratio is too low: {inlier_ratio:.3f} < {config.min_inlier_ratio:.3f}"
+        )
     confidence = min(1.0, float(inlier_ratio) * min(1.0, correspondence_count / max(1, config.max_feature_matches)))
     return GeometricConstraintEstimate(
         sim3=sim3,

@@ -13,6 +13,9 @@ class PgoSolveConfig:
     min_confidence: float
     max_rmse_m: float
     min_inliers: int
+    min_inlier_ratio: float
+    max_constraints_per_keyframe: int
+    min_used_constraints_per_pair: int
     max_alignment_translation_residual_m: float
     max_alignment_rotation_residual_deg: float
     max_alignment_log_scale_residual: float
@@ -63,6 +66,9 @@ class Sim3AlignmentGraph:
         min_confidence: float,
         max_rmse_m: float,
         min_inliers: int,
+        min_inlier_ratio: float = 0.55,
+        max_constraints_per_keyframe: int = 1,
+        min_used_constraints_per_pair: int = 2,
         max_alignment_translation_residual_m: float = 1.0,
         max_alignment_rotation_residual_deg: float = 30.0,
         max_alignment_log_scale_residual: float = 0.25,
@@ -72,6 +78,9 @@ class Sim3AlignmentGraph:
             min_confidence=min_confidence,
             max_rmse_m=max_rmse_m,
             min_inliers=min_inliers,
+            min_inlier_ratio=min_inlier_ratio,
+            max_constraints_per_keyframe=max(0, int(max_constraints_per_keyframe)),
+            min_used_constraints_per_pair=max(1, int(min_used_constraints_per_pair)),
             max_alignment_translation_residual_m=max_alignment_translation_residual_m,
             max_alignment_rotation_residual_deg=max_alignment_rotation_residual_deg,
             max_alignment_log_scale_residual=max_alignment_log_scale_residual,
@@ -108,11 +117,14 @@ class Sim3AlignmentGraph:
                 count_rejections=True,
             )
             pair_observation_counts[self._pair_name(pair)] = len(observations)
+            selected = self._select_best_keyframe_observations(selected, config, rejection_counts)
             pair_used_counts[self._pair_name(pair)] = len(selected)
             reverse_pair = (pair[1], pair[0])
             pair_observation_counts[self._pair_name(reverse_pair)] = len(observations)
             pair_used_counts[self._pair_name(reverse_pair)] = len(selected)
-            if not selected:
+            if len(selected) < config.min_used_constraints_per_pair:
+                for _item in selected:
+                    self._count_rejection(rejection_counts, "too_few_pair_constraints")
                 continue
 
             transforms = [item.transform for item in selected]
@@ -161,6 +173,9 @@ class Sim3AlignmentGraph:
         if constraint.inlier_count < config.min_inliers:
             self._count_rejection(rejection_counts, "too_few_inliers")
             return None
+        if constraint.inlier_ratio < config.min_inlier_ratio:
+            self._count_rejection(rejection_counts, "low_inlier_ratio")
+            return None
         from_kf = self.keyframes.get(constraint.from_key)
         to_kf = self.keyframes.get(constraint.to_key)
         if from_kf is None or to_kf is None:
@@ -207,6 +222,30 @@ class Sim3AlignmentGraph:
                     self._count_rejection(rejection_counts, "alignment_scale_outlier")
                 continue
             selected.append(observation)
+        return selected
+
+
+    def _select_best_keyframe_observations(
+        self,
+        observations: list[AlignmentObservation],
+        config: PgoSolveConfig,
+        rejection_counts: Dict[str, int],
+    ) -> list[AlignmentObservation]:
+        limit = int(config.max_constraints_per_keyframe)
+        if limit <= 0 or len(observations) <= 1:
+            return observations
+
+        selected = []
+        key_use_counts: Dict[KeyframeKey, int] = {}
+        for observation in sorted(observations, key=lambda item: item.weight, reverse=True):
+            from_key = observation.constraint.from_key
+            to_key = observation.constraint.to_key
+            if key_use_counts.get(from_key, 0) >= limit or key_use_counts.get(to_key, 0) >= limit:
+                self._count_rejection(rejection_counts, "keyframe_quality_superseded")
+                continue
+            selected.append(observation)
+            key_use_counts[from_key] = key_use_counts.get(from_key, 0) + 1
+            key_use_counts[to_key] = key_use_counts.get(to_key, 0) + 1
         return selected
 
     def _propagate_alignments(self, pair_edges: Dict[tuple[str, str], Sim3]) -> Dict[str, Sim3]:

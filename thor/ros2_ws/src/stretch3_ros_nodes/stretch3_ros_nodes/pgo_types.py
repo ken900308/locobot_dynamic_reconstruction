@@ -19,6 +19,11 @@ class PoseConstraint:
     payload: Dict[str, Any]
 
     @property
+    def inlier_ratio(self) -> float:
+        denominator = int(self.payload.get("correspondence_count", self.match_count))
+        return float(self.inlier_count / max(1, denominator))
+
+    @property
     def key(self) -> tuple[KeyframeKey, KeyframeKey]:
         return (self.from_key, self.to_key)
 
