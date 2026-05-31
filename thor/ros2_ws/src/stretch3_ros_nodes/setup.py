@@ -35,6 +35,7 @@ setup(
             "multi_robot_native_optimizer_node = stretch3_ros_nodes.multi_robot_native_optimizer_node:main",
             "multi_robot_native_factor_builder_node = stretch3_ros_nodes.multi_robot_native_factor_builder_node:main",
             "multi_robot_native_retrieval_node = stretch3_ros_nodes.multi_robot_native_retrieval_node:main",
+            "multi_robot_native_pose_aware_unity_node = stretch3_ros_nodes.multi_robot_native_pose_aware_unity_node:main",
         ],
     },
 )
