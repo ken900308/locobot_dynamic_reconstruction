@@ -22,6 +22,7 @@ OPTIMIZED_POSE_TOPIC=${OPTIMIZED_POSE_TOPIC:-/multi_robot/optimized_keyframe_pos
 OPTIMIZED_KEYFRAME_CLOUD_TOPIC=${OPTIMIZED_KEYFRAME_CLOUD_TOPIC:-/multi_robot/optimized_keyframe_clouds}
 OPTIMIZED_KEYFRAME_CLOUD_SUMMARY_TOPIC=${OPTIMIZED_KEYFRAME_CLOUD_SUMMARY_TOPIC:-/multi_robot/optimized_keyframe_cloud_summaries}
 OPTIMIZED_MAP_TOPIC=${OPTIMIZED_MAP_TOPIC:-/multi_robot/optimized_map_points}
+OPTIMIZED_FULL_MAP_TOPIC=${OPTIMIZED_FULL_MAP_TOPIC:-/multi_robot/optimized_map_points_full}
 OPTIMIZED_MAP_SUMMARY_TOPIC=${OPTIMIZED_MAP_SUMMARY_TOPIC:-/multi_robot/optimized_map_summaries}
 OUTPUT_FRAME=${OUTPUT_FRAME:-multi_robot_optimized_map}
 MAX_POINTS_PER_KEYFRAME=${MAX_POINTS_PER_KEYFRAME:-30000}
@@ -31,6 +32,8 @@ VOXEL_LEAF_SIZE_PER_KEYFRAME=${VOXEL_LEAF_SIZE_PER_KEYFRAME:-0.0}
 VOXEL_LEAF_SIZE_MERGED=${VOXEL_LEAF_SIZE_MERGED:-0.0}
 PUBLISH_MERGED_PERIOD_SEC=${PUBLISH_MERGED_PERIOD_SEC:-1.0}
 PUBLISH_ONLY_ON_REVISION_CHANGE=${PUBLISH_ONLY_ON_REVISION_CHANGE:-true}
+CHUNK_MAX_POINTS=${CHUNK_MAX_POINTS:-100000}
+CHUNK_PUBLISH_DELAY_SEC=${CHUNK_PUBLISH_DELAY_SEC:-0.333333}
 
 echo "  ROBOT_IDS: $ROBOT_IDS"
 echo "  CLOUD_TOPIC_TEMPLATE: $CLOUD_TOPIC_TEMPLATE"
@@ -38,6 +41,7 @@ echo "  OPTIMIZED_POSE_TOPIC: $OPTIMIZED_POSE_TOPIC"
 echo "  OPTIMIZED_KEYFRAME_CLOUD_TOPIC: $OPTIMIZED_KEYFRAME_CLOUD_TOPIC"
 echo "  OPTIMIZED_KEYFRAME_CLOUD_SUMMARY_TOPIC: $OPTIMIZED_KEYFRAME_CLOUD_SUMMARY_TOPIC"
 echo "  OPTIMIZED_MAP_TOPIC: $OPTIMIZED_MAP_TOPIC"
+echo "  OPTIMIZED_FULL_MAP_TOPIC: $OPTIMIZED_FULL_MAP_TOPIC"
 echo "  OPTIMIZED_MAP_SUMMARY_TOPIC: $OPTIMIZED_MAP_SUMMARY_TOPIC"
 echo "  OUTPUT_FRAME: $OUTPUT_FRAME"
 echo "  MAX_POINTS_PER_KEYFRAME: $MAX_POINTS_PER_KEYFRAME"
@@ -47,6 +51,8 @@ echo "  VOXEL_LEAF_SIZE_PER_KEYFRAME: $VOXEL_LEAF_SIZE_PER_KEYFRAME"
 echo "  VOXEL_LEAF_SIZE_MERGED: $VOXEL_LEAF_SIZE_MERGED"
 echo "  PUBLISH_MERGED_PERIOD_SEC: $PUBLISH_MERGED_PERIOD_SEC"
 echo "  PUBLISH_ONLY_ON_REVISION_CHANGE: $PUBLISH_ONLY_ON_REVISION_CHANGE"
+echo "  CHUNK_MAX_POINTS: $CHUNK_MAX_POINTS"
+echo "  CHUNK_PUBLISH_DELAY_SEC: $CHUNK_PUBLISH_DELAY_SEC"
 
 ros2 run stretch3_ros_nodes multi_robot_optimized_map_node --ros-args \
     -p robot_ids:="$ROBOT_IDS" \
@@ -55,6 +61,7 @@ ros2 run stretch3_ros_nodes multi_robot_optimized_map_node --ros-args \
     -p optimized_keyframe_cloud_topic:="$OPTIMIZED_KEYFRAME_CLOUD_TOPIC" \
     -p optimized_keyframe_cloud_summary_topic:="$OPTIMIZED_KEYFRAME_CLOUD_SUMMARY_TOPIC" \
     -p optimized_map_topic:="$OPTIMIZED_MAP_TOPIC" \
+    -p optimized_full_map_topic:="$OPTIMIZED_FULL_MAP_TOPIC" \
     -p optimized_map_summary_topic:="$OPTIMIZED_MAP_SUMMARY_TOPIC" \
     -p output_frame:="$OUTPUT_FRAME" \
     -p max_points_per_keyframe:="$MAX_POINTS_PER_KEYFRAME" \
@@ -63,4 +70,6 @@ ros2 run stretch3_ros_nodes multi_robot_optimized_map_node --ros-args \
     -p voxel_leaf_size_per_keyframe:="$VOXEL_LEAF_SIZE_PER_KEYFRAME" \
     -p voxel_leaf_size_merged:="$VOXEL_LEAF_SIZE_MERGED" \
     -p publish_merged_period_sec:="$PUBLISH_MERGED_PERIOD_SEC" \
-    -p publish_only_on_revision_change:="$PUBLISH_ONLY_ON_REVISION_CHANGE"
+    -p publish_only_on_revision_change:="$PUBLISH_ONLY_ON_REVISION_CHANGE" \
+    -p chunk_max_points:="$CHUNK_MAX_POINTS" \
+    -p chunk_publish_delay_sec:="$CHUNK_PUBLISH_DELAY_SEC"

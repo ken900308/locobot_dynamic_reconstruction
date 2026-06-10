@@ -4,7 +4,7 @@ set -euo pipefail
 #############################
 # Robot-facing rosbridge I/O
 #############################
-ROBOT_ROSBRIDGE_HOST=${ROBOT_ROSBRIDGE_HOST:-192.168.0.213}
+ROBOT_ROSBRIDGE_HOST=${ROBOT_ROSBRIDGE_HOST:-192.168.0.150}
 ROBOT_ROSBRIDGE_PORT=${ROBOT_ROSBRIDGE_PORT:-9090}
 ROBOT_IMAGE_TOPIC=${ROBOT_IMAGE_TOPIC:-/locobot/camera/camera/color/image_raw/compressed}
 ROBOT_CAMERA_INFO_TOPIC=${ROBOT_CAMERA_INFO_TOPIC:-/locobot/camera/camera/color/camera_info}
