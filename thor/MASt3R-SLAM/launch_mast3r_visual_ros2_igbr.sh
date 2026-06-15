@@ -23,7 +23,8 @@ LOCAL_TF_TOPIC=${LOCAL_TF_TOPIC:-/${ROBOT_ID}/tf}
 LOCAL_TF_STATIC_TOPIC=${LOCAL_TF_STATIC_TOPIC:-/${ROBOT_ID}/tf_static}
 MAST3R_FRAME_POINTCLOUD_TOPIC=${MAST3R_FRAME_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast3r/frame_pointcloud}
 MAST3R_FULLMAP_POINTCLOUD_TOPIC=${MAST3R_FULLMAP_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast3r/pointcloud_in_map}
-USE_CALIB=${USE_CALIB:-false}
+MAST3R_FULLMAP_RAW_POINTCLOUD_TOPIC=${MAST3R_FULLMAP_RAW_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast3r/pointcloud_in_mast3r_map}
+USE_CALIB=${USE_CALIB:-true}
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -104,7 +105,7 @@ fi
 if [ "$USE_CALIB" = "true" ]; then
     MAST3R_CONFIG="config/calib.yaml"
 else
-    MAST3R_CONFIG="config/base.yaml"
+    MAST3R_CONFIG="config/eval_no_calib.yaml"
 fi
 
 echo ""
@@ -122,6 +123,7 @@ echo "  Robot transport: $(if [ "$USE_ROSBRIDGE" = "true" ]; then echo "rosbridg
 echo "  Remote TF topics: $ROSBRIDGE_TF_TOPIC, $ROSBRIDGE_TF_STATIC_TOPIC"
 echo "  Local TF topics: $LOCAL_TF_TOPIC, $LOCAL_TF_STATIC_TOPIC"
 echo "  PointCloud outputs: $MAST3R_FRAME_POINTCLOUD_TOPIC, $MAST3R_FULLMAP_POINTCLOUD_TOPIC"
+echo "  Raw fullmap output: $MAST3R_FULLMAP_RAW_POINTCLOUD_TOPIC"
 echo ""
 
 cleanup() {
@@ -149,6 +151,7 @@ ROS_ARGS=(
     -p "rosbridge_tf_static_topic:=$ROSBRIDGE_TF_STATIC_TOPIC"
     -p "frame_pointcloud_topic:=$MAST3R_FRAME_POINTCLOUD_TOPIC"
     -p "fullmap_pointcloud_topic:=$MAST3R_FULLMAP_POINTCLOUD_TOPIC"
+    -p "fullmap_raw_pointcloud_topic:=$MAST3R_FULLMAP_RAW_POINTCLOUD_TOPIC"
     -r "/tf:=$LOCAL_TF_TOPIC"
     -r "/tf_static:=$LOCAL_TF_STATIC_TOPIC"
 )

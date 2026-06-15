@@ -106,7 +106,7 @@ class KeyframeMetadataExporter:
     def __init__(self, node: Any, robot_id: str):
         self.node = node
         self.robot_id = robot_id
-        self.enabled = ROS_METADATA_AVAILABLE and getattr(node, "ros_enabled", False)
+        self.enabled = ROS_METADATA_AVAILABLE and getattr(node, "ros_enabled", True)
         self.publisher = None
         self.cloud_publisher = None
         self.image_publisher = None
@@ -144,14 +144,28 @@ class KeyframeMetadataExporter:
         if self.publisher is None:
             return
 
+        payload = self._publish_metadata(keyframe)
+        if payload is None:
+            return
+        self._publish_keyframe_image(keyframe, payload["keyframe_uid"])
+        self._publish_local_cloud(keyframe, payload["keyframe_uid"])
+
+    def publish_metadata_only(self, keyframe: Any, reason: str = "local_pgo") -> None:
+        self._publish_metadata(keyframe, update_reason=reason)
+
+    def _publish_metadata(self, keyframe: Any, update_reason: str | None = None) -> Dict[str, Any] | None:
+        if self.publisher is None:
+            return None
+
         payload = keyframe_to_metadata(self.robot_id, keyframe)
         payload["stamp"] = self.node.get_clock().now().nanoseconds
+        if update_reason:
+            payload["update_reason"] = update_reason
 
         msg = String()
         msg.data = json.dumps(payload, separators=(",", ":"))
         self.publisher.publish(msg)
-        self._publish_keyframe_image(keyframe, payload["keyframe_uid"])
-        self._publish_local_cloud(keyframe, payload["keyframe_uid"])
+        return payload
 
     def _publish_keyframe_image(self, keyframe: Any, keyframe_uid: str) -> None:
         if self.image_publisher is None:

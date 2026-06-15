@@ -1,5 +1,5 @@
-use_calib: False
-single_thread: False
+use_calib: True
+single_thread: True
 dataset:
   subsample: 1
   img_downsample: 1
