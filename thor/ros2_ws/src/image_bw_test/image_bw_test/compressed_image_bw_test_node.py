@@ -9,7 +9,7 @@ from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from sensor_msgs.msg import CompressedImage
 
-from image_bw_test.bandwidth_tracker import BandwidthTracker
+from image_bw_test.bandwidth_tracker import BandwidthTracker, TopicBandwidth
 
 
 DEFAULT_RAW_TOPICS = [
@@ -92,7 +92,8 @@ class CompressedImageBandwidthTestNode(Node):
         self._log_file.write(f"# compressed image bandwidth test started at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         self._log_file.write(f"# raw_topics={','.join(self._raw_topics)}\n")
         self._log_file.write(f"# fusion_topic={self._fusion_topic}\n")
-        self._log_file.write("# columns: wall_time, raw_total_mbps, fusion_mbps, saved_mbps, reduction_percent, detail\n")
+        self._log_file.write("# columns: wall_time, raw_total_mbps, fusion_mbps, saved_mbps, reduction_percent, per-topic detail\n")
+        self._log_file.write("# per-topic detail includes Mbps, MB/s, msg/s, n, mean/min/max message size, total bytes in window\n")
         self._log_file.flush()
 
     def _get_string_array_parameter(self, name: str) -> List[str]:
@@ -189,22 +190,38 @@ class CompressedImageBandwidthTestNode(Node):
                 now_sec,
             )
 
-        raw_detail = ", ".join(
-            f"{report.topic}={report.mbps:.3f} Mbps "
-            f"({report.msg_per_sec:.1f} msg/s, n={report.sample_count})"
-            for report in raw_reports
+        topic_reports = [*raw_reports, fusion_report]
+        topic_detail = ", ".join(
+            self._format_topic_report(report) for report in topic_reports
         )
         message = (
             "[BW] "
             f"raw_total={comparison.raw_total_mbps:.3f} Mbps, "
-            f"fusion={comparison.fusion_mbps:.3f} Mbps "
-            f"({fusion_report.msg_per_sec:.1f} msg/s, n={fusion_report.sample_count}), "
+            f"fusion={comparison.fusion_mbps:.3f} Mbps, "
             f"saved={comparison.saved_mbps:.3f} Mbps, "
             f"reduction={comparison.reduction_percent:.1f}% | "
-            f"{raw_detail}"
+            f"{topic_detail}"
         )
         self.get_logger().info(message)
-        self._write_log_line(comparison, raw_detail)
+        self._write_log_line(comparison, topic_detail)
+
+    def _format_topic_report(self, report: TopicBandwidth) -> str:
+        return (
+            f"{report.topic}={report.mbps:.3f} Mbps "
+            f"({report.msg_per_sec:.1f} msg/s, n={report.sample_count}, "
+            f"bw={report.megabytes_per_sec:.3f} MB/s, "
+            f"mean={self._format_bytes(report.mean_msg_bytes)}, "
+            f"min={self._format_bytes(report.min_msg_bytes)}, "
+            f"max={self._format_bytes(report.max_msg_bytes)}, "
+            f"window_bytes={report.total_bytes})"
+        )
+
+    def _format_bytes(self, num_bytes: float) -> str:
+        if num_bytes < 1_000.0:
+            return f"{num_bytes:.0f} B"
+        if num_bytes < 1_000_000.0:
+            return f"{num_bytes / 1_000.0:.2f} KB"
+        return f"{num_bytes / 1_000_000.0:.2f} MB"
 
     def _write_log_line(self, comparison, raw_detail: str) -> None:
         if self._log_file is None:

@@ -10,10 +10,17 @@ class TopicBandwidth:
     msg_per_sec: float
     sample_count: int
     total_bytes: int
+    mean_msg_bytes: float
+    min_msg_bytes: int
+    max_msg_bytes: int
 
     @property
     def mbps(self) -> float:
         return self.bytes_per_sec * 8.0 / 1_000_000.0
+
+    @property
+    def megabytes_per_sec(self) -> float:
+        return self.bytes_per_sec / 1_000_000.0
 
 
 @dataclass(frozen=True)
@@ -48,17 +55,25 @@ class BandwidthTracker:
         samples = self._samples[topic]
         self._prune(samples, now_sec)
 
-        total_bytes = sum(payload_bytes for _, payload_bytes in samples)
+        payload_sizes = [payload_bytes for _, payload_bytes in samples]
+        total_bytes = sum(payload_sizes)
         elapsed_sec = self._effective_window(samples, now_sec)
+        sample_count = len(payload_sizes)
         bytes_per_sec = total_bytes / elapsed_sec if elapsed_sec > 0.0 else 0.0
-        msg_per_sec = len(samples) / elapsed_sec if elapsed_sec > 0.0 else 0.0
+        msg_per_sec = sample_count / elapsed_sec if elapsed_sec > 0.0 else 0.0
+        mean_msg_bytes = total_bytes / sample_count if sample_count else 0.0
+        min_msg_bytes = min(payload_sizes) if payload_sizes else 0
+        max_msg_bytes = max(payload_sizes) if payload_sizes else 0
 
         return TopicBandwidth(
             topic=topic,
             bytes_per_sec=bytes_per_sec,
             msg_per_sec=msg_per_sec,
-            sample_count=len(samples),
+            sample_count=sample_count,
             total_bytes=total_bytes,
+            mean_msg_bytes=mean_msg_bytes,
+            min_msg_bytes=min_msg_bytes,
+            max_msg_bytes=max_msg_bytes,
         )
 
     def comparison(
