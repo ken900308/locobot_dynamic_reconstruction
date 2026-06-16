@@ -21,6 +21,7 @@ import torch
 import multiprocessing as mp
 from pathlib import Path
 import argparse
+import yaml
 import datetime
 import json
 
@@ -839,24 +840,29 @@ class MASt3RSLAMVisualizationNode(Node):
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.set_grad_enabled(False)
             
-            # Wait for camera info with timeout
-            self.get_logger().info("⏳ Waiting for camera intrinsics...")
-            timeout_start = time.time()
-            while self.camera_info is None and not should_exit:
-                if time.time() - timeout_start > 10.0:  # 10 second timeout
-                    self.get_logger().warn("⚠️ Camera info timeout - proceeding with default settings")
-                    break
-                rclpy.spin_once(self, timeout_sec=0.1)
+            if config.get('use_calib', False):
+                self.setup_camera_intrinsics_from_yaml()
+
+            # Wait for camera info with timeout only if YAML intrinsics were not available.
+            if config.get('use_calib', False) and not hasattr(self, 'K'):
+                self.get_logger().info("⏳ Waiting for camera intrinsics...")
+                timeout_start = time.time()
+                while self.camera_info is None and not should_exit:
+                    if time.time() - timeout_start > 10.0:  # 10 second timeout
+                        self.get_logger().warn("⚠️ Camera info timeout - proceeding with default settings")
+                        break
+                    rclpy.spin_once(self, timeout_sec=0.1)
             
             if should_exit:
                 return
                 
             # Set up camera intrinsics
-            self.raw_h, self.raw_w = 480, 640  # D415 橫放: 640x480 (width x height)
-            if self.camera_info:
+            if not hasattr(self, 'raw_h') or not hasattr(self, 'raw_w'):
+                self.raw_h, self.raw_w = 480, 640  # Default fallback dimensions
+            if self.camera_info and not hasattr(self, 'K'):
                 self.setup_camera_intrinsics()  # ROS 模式：從 CameraInfo 讀取並正確縮放
             if config.get('use_calib', False) and not hasattr(self, 'K'):
-                raise RuntimeError('use_calib=True but no valid CameraInfo intrinsics were received')
+                raise RuntimeError('use_calib=True but no valid intrinsics were available')
             
             # We'll initialize SLAM with correct dimensions after first image processing
             self.slam_initialized = False
@@ -923,6 +929,47 @@ class MASt3RSLAMVisualizationNode(Node):
             self.get_logger().error(f"Failed to initialize SLAM: {str(e)}")
             self.get_logger().error(f"Traceback: {traceback.format_exc()}")
             raise
+
+    def setup_camera_intrinsics_from_yaml(self):
+        """Set up camera intrinsics from config/intrinsics.yaml if present."""
+        intrinsics_path = Path(self.config_file).parent / "intrinsics.yaml"
+        if not intrinsics_path.exists():
+            self.get_logger().warn(f"⚠️ Intrinsics YAML not found: {intrinsics_path}")
+            return False
+
+        try:
+            with open(intrinsics_path, "r") as f:
+                intrinsics_config = yaml.safe_load(f) or {}
+
+            W = int(intrinsics_config["width"])
+            H = int(intrinsics_config["height"])
+            calib = intrinsics_config["calibration"]
+            if not isinstance(calib, (list, tuple)) or len(calib) < 4:
+                raise ValueError("calibration must contain at least [fx, fy, cx, cy]")
+
+            intrinsics = Intrinsics.from_calib(512, W, H, calib)
+            if intrinsics is None:
+                self.get_logger().warn("⚠️ Intrinsics.from_calib returned None for YAML intrinsics")
+                return False
+
+            self.raw_w = W
+            self.raw_h = H
+            self.K = torch.from_numpy(intrinsics.K_frame).to(self.device, dtype=torch.float32)
+            self.intrinsics_source = str(intrinsics_path)
+
+            self.get_logger().info(f"📐 Camera intrinsics loaded from YAML: {intrinsics_path}")
+            self.get_logger().info(
+                f"  Raw: {W}x{H}, fx={float(calib[0]):.2f}, fy={float(calib[1]):.2f}, "
+                f"cx={float(calib[2]):.2f}, cy={float(calib[3]):.2f}"
+            )
+            self.get_logger().info(
+                f"  K_frame: fx={self.K[0,0]:.2f}, fy={self.K[1,1]:.2f}, "
+                f"cx={self.K[0,2]:.2f}, cy={self.K[1,2]:.2f}"
+            )
+            return True
+        except Exception as e:
+            self.get_logger().warn(f"⚠️ Failed to load YAML intrinsics from {intrinsics_path}: {e}")
+            return False
     
     def setup_camera_intrinsics(self):
         """Set up camera intrinsics from ROS CameraInfo (with correct K_frame scaling for MASt3R 512px)"""
@@ -940,6 +987,7 @@ class MASt3RSLAMVisualizationNode(Node):
         
         # K_frame 是對 MASt3R 縮放後圖像正確的內參矩陣
         self.K = torch.from_numpy(intrinsics.K_frame).to(self.device, dtype=torch.float32)
+        self.intrinsics_source = self.camera_info_topic
         
         self.get_logger().info(f"📐 Camera intrinsics (ROS CameraInfo, scaled to MASt3R 512px):")
         self.get_logger().info(f"  Raw: {W}x{H}, fx={calib[0]:.2f}, fy={calib[1]:.2f}, cx={calib[2]:.2f}, cy={calib[3]:.2f}")
