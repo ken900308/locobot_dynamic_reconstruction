@@ -30,7 +30,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from sensor_msgs.msg import Image, CompressedImage, CameraInfo, PointCloud2, PointField
 from geometry_msgs.msg import TransformStamped
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Float64
 from cv_bridge import CvBridge
 import tf2_ros
 
@@ -52,6 +52,7 @@ from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
 from mast3r_slam.keyframe_metadata_exporter import KeyframeMetadataExporter
 from mast3r_slam.mast3r_utils import load_mast3r, mast3r_inference_mono
 from mast3r_slam.multiprocess_utils import new_queue, try_get_msg
+from mast3r_slam.scale_ratio_estimator import KeyframeScaleRatioEstimator, LiveOdomBuffer
 from mast3r_slam.tracker import FrameTracker
 from mast3r_slam.visualization import WindowMsg, run_visualization
 import lietorch
@@ -127,6 +128,12 @@ class MASt3RSLAMVisualizationNode(Node):
         self.declare_parameter('fullmap_pointcloud_topic', '/mast3r/pointcloud_in_map')
         default_raw_topic = f"/{os.environ.get('ROBOT_ID', 'robot1')}/mast3r/pointcloud_in_mast3r_map"
         self.declare_parameter('fullmap_raw_pointcloud_topic', default_raw_topic)
+        self.declare_parameter('odom_traj', os.environ.get('MAST3R_ODOM_TRAJ', ''))
+        self.declare_parameter('odom_topic', os.environ.get('MAST3R_ODOM_TOPIC', ''))
+        self.declare_parameter('odom_max_time_diff', float(os.environ.get('MAST3R_ODOM_MAX_TIME_DIFF', '0.05')))
+        self.declare_parameter('odom_buffer_sec', float(os.environ.get('MAST3R_ODOM_BUFFER_SEC', '300.0')))
+        default_scale_topic = f"/{os.environ.get('ROBOT_ID', 'robot1')}/mast3r/scale_ratio"
+        self.declare_parameter('scale_ratio_topic', os.environ.get('MAST3R_SCALE_RATIO_TOPIC', default_scale_topic))
 
         # Get parameters
         self.config_file = self.get_parameter('config_file').get_parameter_value().string_value
@@ -144,6 +151,11 @@ class MASt3RSLAMVisualizationNode(Node):
         self.frame_pointcloud_topic = self.get_parameter('frame_pointcloud_topic').get_parameter_value().string_value
         self.fullmap_pointcloud_topic = self.get_parameter('fullmap_pointcloud_topic').get_parameter_value().string_value
         self.fullmap_raw_pointcloud_topic = self.get_parameter('fullmap_raw_pointcloud_topic').get_parameter_value().string_value
+        self.odom_traj = self.get_parameter('odom_traj').get_parameter_value().string_value
+        self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
+        self.odom_max_time_diff = self.get_parameter('odom_max_time_diff').get_parameter_value().double_value
+        self.odom_buffer_sec = self.get_parameter('odom_buffer_sec').get_parameter_value().double_value
+        self.scale_ratio_topic = self.get_parameter('scale_ratio_topic').get_parameter_value().string_value
 
         # 自動偵測或使用參數設定壓縮模式
         use_compressed_param = self.get_parameter('use_compressed').get_parameter_value().bool_value
@@ -152,6 +164,33 @@ class MASt3RSLAMVisualizationNode(Node):
         self.bridge = CvBridge()
         self.robot_id = os.environ.get('ROBOT_ID', 'robot1')
         self.keyframe_metadata_exporter = None
+        self.scale_ratio_estimator = None
+        self.live_odom_buffer = None
+        self.odom_sub = None
+        self.scale_ratio_publisher = None
+        self._last_published_scale_ratio = None
+        self._warned_zero_odom_stamp = False
+        if self.odom_traj and self.odom_topic:
+            raise ValueError("Use either odom_traj or odom_topic for scale ratio, not both")
+        if self.odom_topic and not self.use_rosbridge:
+            raise ValueError("Live odom scale ratio mode uses rosbridge; enable use_rosbridge or use odom_traj")
+        if self.odom_traj:
+            self.scale_ratio_estimator = KeyframeScaleRatioEstimator(
+                odom_path=self.odom_traj,
+                output_csv="logs/scale_ratio_log.csv",
+                logger=self.get_logger(),
+            )
+        elif self.odom_topic:
+            self.live_odom_buffer = LiveOdomBuffer(
+                max_time_diff=self.odom_max_time_diff,
+                buffer_sec=self.odom_buffer_sec,
+                logger=self.get_logger(),
+            )
+            self.scale_ratio_estimator = KeyframeScaleRatioEstimator(
+                odom_source=self.live_odom_buffer,
+                output_csv="logs/scale_ratio_log.csv",
+                logger=self.get_logger(),
+            )
         
         # 改進 1: 使用短 FIFO (deque) 取代深 queue
         # maxlen=3 確保只保留最近的 3 張影像，避免延遲堆積
@@ -205,13 +244,16 @@ class MASt3RSLAMVisualizationNode(Node):
             self.rosbridge_camera_info_listener = None
             self.rosbridge_tf_listener = None
             self.rosbridge_tf_static_listener = None
+            self.rosbridge_odom_listener = None
             self._rosbridge_image_queue = []
             self._rosbridge_camera_info_queue = []
             self._rosbridge_tf_queue = []
             self._rosbridge_tf_static_queue = []
+            self._rosbridge_odom_queue = []
             self._static_tf_cache = {}
             self._rosbridge_tf_count = 0
             self._rosbridge_tf_static_count = 0
+            self._rosbridge_odom_count = 0
             self._rosbridge_image_received_count = 0
             self._rosbridge_image_overwrite_count = 0
             self._last_rosbridge_image_stamp = None
@@ -221,6 +263,7 @@ class MASt3RSLAMVisualizationNode(Node):
             self._rosbridge_camera_info_queue_lock = threading.Lock()
             self._rosbridge_tf_queue_lock = threading.Lock()
             self._rosbridge_tf_static_queue_lock = threading.Lock()
+            self._rosbridge_odom_queue_lock = threading.Lock()
             self.init_rosbridge_in_main_thread()
         else:
             if self.use_compressed:
@@ -291,6 +334,9 @@ class MASt3RSLAMVisualizationNode(Node):
             f"🎯 Raw Full Map publisher:     {self.fullmap_raw_pointcloud_topic} (ROS/MASt3R frame)"
         )
         self.keyframe_metadata_exporter = KeyframeMetadataExporter(self, self.robot_id)
+        if self.scale_ratio_estimator is not None:
+            self.scale_ratio_publisher = self.create_publisher(Float64, self.scale_ratio_topic, frame_pc_qos)
+            self.get_logger().info(f"[ScaleRatio pre-PGO] Publishing scale ratio on {self.scale_ratio_topic}")
         self.min_confidence_threshold = 0.95  # 置信度過濾閾值
         self.pc_publish_count = 0
         self.pc_last_log_time = time.time()
@@ -304,6 +350,9 @@ class MASt3RSLAMVisualizationNode(Node):
         self.get_logger().info(f"Camera info topic: {self.camera_info_topic}")
         self.get_logger().info(f"Using device: {self.device}")
         self.get_logger().info(f"Save as: {self.save_as}")
+        self.get_logger().info(f"Odom trajectory for scale ratio: {self.odom_traj or '(disabled)'}")
+        self.get_logger().info(f"Live odom topic for scale ratio: {self.odom_topic or '(disabled)'}")
+        self.get_logger().info(f"Scale ratio topic: {self.scale_ratio_topic if self.scale_ratio_estimator is not None else '(disabled)'}")
         self.get_logger().info(f"Max FPS: {self.max_fps}")
         self.get_logger().info(f"Image buffer size: 3 (short FIFO)")
         
@@ -370,6 +419,19 @@ class MASt3RSLAMVisualizationNode(Node):
             )
             self.get_logger().info(f"Subscribed to {self.camera_info_topic} via rosbridge")
 
+            if self.live_odom_buffer is not None:
+                self.rosbridge_odom_listener = roslibpy.Topic(
+                    self.ros_client,
+                    self.odom_topic,
+                    'nav_msgs/Odometry',
+                    queue_size=100,
+                    queue_length=1,
+                )
+                self.rosbridge_odom_listener.subscribe(self._queue_rosbridge_odom_msg)
+                self.get_logger().info(
+                    f"[ScaleRatio pre-PGO] Subscribed to {self.odom_topic} via rosbridge"
+                )
+
             self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
             self.static_tf_broadcaster = tf2_ros.StaticTransformBroadcaster(self)
 
@@ -421,6 +483,12 @@ class MASt3RSLAMVisualizationNode(Node):
             self._rosbridge_image_queue.append(msg)
             self._rosbridge_image_received_count += 1
 
+    def _queue_rosbridge_odom_msg(self, msg):
+        with self._rosbridge_odom_queue_lock:
+            self._rosbridge_odom_queue.append(msg)
+            if len(self._rosbridge_odom_queue) > 200:
+                del self._rosbridge_odom_queue[:-200]
+
     def poll_rosbridge_queue(self):
         image_msg = None
         with self._rosbridge_queue_lock:
@@ -434,6 +502,10 @@ class MASt3RSLAMVisualizationNode(Node):
             if self._rosbridge_camera_info_queue:
                 msg = self._rosbridge_camera_info_queue.pop(0)
                 self.process_rosbridge_camera_info(msg)
+
+        with self._rosbridge_odom_queue_lock:
+            while self._rosbridge_odom_queue:
+                self.process_rosbridge_odom(self._rosbridge_odom_queue.pop(0))
 
         with self._rosbridge_tf_queue_lock:
             while self._rosbridge_tf_queue:
@@ -579,7 +651,9 @@ class MASt3RSLAMVisualizationNode(Node):
             stamp = msg.get('header', {}).get('stamp', {})
             sec = stamp.get('sec', 0) if isinstance(stamp, dict) else 0
             nanosec = stamp.get('nanosec', stamp.get('nsecs', 0)) if isinstance(stamp, dict) else 0
-            timestamp = sec + nanosec * 1e-9
+            header_timestamp = sec + nanosec * 1e-9
+            scale_timestamp = header_timestamp if header_timestamp > 0 else None
+            timestamp = header_timestamp
             if timestamp == 0:
                 timestamp = time.time()
 
@@ -588,7 +662,7 @@ class MASt3RSLAMVisualizationNode(Node):
 
             with self.buffer_lock:
                 old_size = len(self.image_buffer)
-                self.image_buffer.append((timestamp, cv_image))
+                self.image_buffer.append((timestamp, cv_image, scale_timestamp))
                 if old_size == 3:
                     self.dropped_count += 1
                     if self.dropped_count % 50 == 0:
@@ -607,6 +681,7 @@ class MASt3RSLAMVisualizationNode(Node):
             'rosbridge_camera_info_listener',
             'rosbridge_tf_listener',
             'rosbridge_tf_static_listener',
+            'rosbridge_odom_listener',
         ]:
             listener = getattr(self, attr, None)
             if listener is not None:
@@ -667,6 +742,7 @@ class MASt3RSLAMVisualizationNode(Node):
                 cv_image = cv_image.astype(np.float32) / 255.0
             
             timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            scale_timestamp = timestamp if timestamp > 0 else None
             
             # 檢查時間戳穩定性
             if hasattr(self, 'last_timestamp') and self.last_timestamp is not None:
@@ -681,7 +757,7 @@ class MASt3RSLAMVisualizationNode(Node):
             # 如果 buffer 滿了，自動丟棄最舊的影像
             with self.buffer_lock:
                 old_size = len(self.image_buffer)
-                self.image_buffer.append((timestamp, cv_image))
+                self.image_buffer.append((timestamp, cv_image, scale_timestamp))
                 if old_size == 3:  # maxlen=3，滿了會自動丟棄最舊的
                     self.dropped_count += 1
                     if self.dropped_count % 50 == 0:  # 每 50 幀報告一次
@@ -726,11 +802,12 @@ class MASt3RSLAMVisualizationNode(Node):
             cv_image = cv_image.astype(np.float32) / 255.0
             
             timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            scale_timestamp = timestamp if timestamp > 0 else None
             
             # 使用非阻塞的 deque append
             with self.buffer_lock:
                 old_size = len(self.image_buffer)
-                self.image_buffer.append((timestamp, cv_image))
+                self.image_buffer.append((timestamp, cv_image, scale_timestamp))
                 if old_size == 3:
                     self.dropped_count += 1
                     if self.dropped_count % 50 == 0:
@@ -906,9 +983,6 @@ class MASt3RSLAMVisualizationNode(Node):
             if len(points_np) == 0:
                 return
 
-            # Unity 左手座標轉換：Z = -Z (ROS 右手 → Unity 左手)
-            points_np[:, 2] = -points_np[:, 2]
-
             point_dtype = np.dtype([
                 ('x', '<f4'), ('y', '<f4'), ('z', '<f4'),
                 ('rgb', '<u4'),
@@ -956,6 +1030,67 @@ class MASt3RSLAMVisualizationNode(Node):
 
         except Exception as e:
             self.get_logger().error(f"❌ Error publishing frame pointcloud: {str(e)}")
+
+    def process_rosbridge_odom(self, msg):
+        """Store rosbridge odom samples by robot-side ROS header timestamp."""
+        if self.live_odom_buffer is None:
+            return
+        try:
+            stamp = msg.get('header', {}).get('stamp', {})
+            sec = stamp.get('sec', 0) if isinstance(stamp, dict) else 0
+            nanosec = stamp.get('nanosec', stamp.get('nsecs', 0)) if isinstance(stamp, dict) else 0
+            timestamp = float(sec) + float(nanosec) * 1e-9
+            if timestamp <= 0:
+                if not self._warned_zero_odom_stamp:
+                    self.get_logger().warning(
+                        "[ScaleRatio pre-PGO] Rosbridge odom header timestamp is zero; dropping odom samples"
+                    )
+                    self._warned_zero_odom_stamp = True
+                return
+            position = msg.get('pose', {}).get('pose', {}).get('position', {})
+            x = float(position.get('x', 0.0))
+            y = float(position.get('y', 0.0))
+            self.live_odom_buffer.add_sample(timestamp, x, y)
+            self._rosbridge_odom_count += 1
+        except Exception as e:
+            self.get_logger().warning(f"[ScaleRatio pre-PGO] Failed to parse rosbridge odom: {e}")
+
+    def record_scale_ratio_keyframe(self, frame, timestamp):
+        """Append-time/pre-PGO scale estimate against odom, if enabled."""
+        if self.scale_ratio_estimator is None:
+            return
+        if timestamp is None or timestamp <= 0:
+            self.get_logger().warning(
+                "[ScaleRatio pre-PGO] Missing keyframe header timestamp; skipping scale ratio row"
+            )
+            return
+        try:
+            keyframe_index = max(0, len(self.keyframes) - 1)
+            self.scale_ratio_estimator.on_keyframe(
+                keyframe_index, frame.frame_id, float(timestamp), frame.T_WC
+            )
+            self.publish_current_scale_ratio()
+        except Exception as e:
+            self.get_logger().error(f"[ScaleRatio pre-PGO] Error recording keyframe: {e}")
+
+    def publish_current_scale_ratio(self):
+        if self.scale_ratio_publisher is None or self.scale_ratio_estimator is None:
+            return
+        scale = self.scale_ratio_estimator.current_scale_ratio()
+        if scale is None or not np.isfinite(scale) or scale <= 0:
+            return
+        msg = Float64()
+        msg.data = float(scale)
+        self.scale_ratio_publisher.publish(msg)
+        self._last_published_scale_ratio = float(scale)
+
+    def get_current_fullmap_scale(self):
+        if self.scale_ratio_estimator is None:
+            return 1.0
+        scale = self.scale_ratio_estimator.current_scale_ratio()
+        if scale is None or not np.isfinite(scale) or scale <= 0:
+            return 1.0
+        return float(scale)
 
     def _make_fullmap_point_data(self, points_np, colors_np):
         point_dtype = np.dtype([('x', '<f4'), ('y', '<f4'), ('z', '<f4'), ('rgb', '<u4')])
@@ -1077,12 +1212,12 @@ class MASt3RSLAMVisualizationNode(Node):
                 stamp,
             )
 
-            unity_points = merged_points.copy()
-            unity_points[:, 2] = -unity_points[:, 2]
-            unity_point_data = self._make_fullmap_point_data(unity_points, merged_colors)
+            map_scale = self.get_current_fullmap_scale()
+            scaled_points = (merged_points * map_scale).astype(np.float32, copy=False)
+            scaled_point_data = self._make_fullmap_point_data(scaled_points, merged_colors)
             unity_chunks = self._publish_chunked_fullmap(
                 self.fullmap_pc_publisher,
-                unity_point_data,
+                scaled_point_data,
                 "kf_999999",
                 stamp,
             )
@@ -1090,7 +1225,8 @@ class MASt3RSLAMVisualizationNode(Node):
             self.loop_closure_count += 1
             self.get_logger().info(
                 f"💥 [Loop Closure PGO #{self.loop_closure_count}] "
-                f"Full maps sent: {len(merged_points)} pts, raw_chunks={raw_chunks}, unity_chunks={unity_chunks}."
+                f"Full maps sent: {len(merged_points)} pts, raw_chunks={raw_chunks}, "
+                f"unity_chunks={unity_chunks}, unity_scale={map_scale:.6f}, z_flip=False."
             )
 
         except Exception as e:
@@ -1137,10 +1273,16 @@ class MASt3RSLAMVisualizationNode(Node):
                 
                 # 改進 1: 從短 FIFO 取出最舊的影像處理
                 timestamp = None
+                scale_timestamp = None
                 img = None
                 with self.buffer_lock:
                     if self.image_buffer:
-                        timestamp, img = self.image_buffer.popleft()  # 取最舊的
+                        item = self.image_buffer.popleft()  # 取最舊的
+                        if len(item) == 3:
+                            timestamp, img, scale_timestamp = item
+                        else:
+                            timestamp, img = item
+                            scale_timestamp = timestamp if timestamp and timestamp > 0 else None
                         consecutive_empty = 0
                     else:
                         consecutive_empty += 1
@@ -1279,6 +1421,7 @@ class MASt3RSLAMVisualizationNode(Node):
                     
                     with self.keyframes_lock:
                         self.keyframes.append(frame)
+                    self.record_scale_ratio_keyframe(frame, scale_timestamp)
                         
                     with self.states_lock:
                         self.states.queue_global_optimization(len(self.keyframes) - 1)
@@ -1319,6 +1462,7 @@ class MASt3RSLAMVisualizationNode(Node):
                     if self.keyframes is not None:
                         with self.keyframes_lock:
                             self.keyframes.append(frame)
+                        self.record_scale_ratio_keyframe(frame, scale_timestamp)
                         with self.states_lock:
                             self.states.queue_global_optimization(len(self.keyframes) - 1)
                         self.get_logger().info(f"📍 New keyframe added (total: {len(self.keyframes)})")

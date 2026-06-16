@@ -25,6 +25,8 @@ MAST3R_FRAME_POINTCLOUD_TOPIC=${MAST3R_FRAME_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast
 MAST3R_FULLMAP_POINTCLOUD_TOPIC=${MAST3R_FULLMAP_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast3r/pointcloud_in_map}
 MAST3R_FULLMAP_RAW_POINTCLOUD_TOPIC=${MAST3R_FULLMAP_RAW_POINTCLOUD_TOPIC:-/${ROBOT_ID}/mast3r/pointcloud_in_mast3r_map}
 USE_CALIB=${USE_CALIB:-true}
+MAST3R_ODOM_TRAJ=${MAST3R_ODOM_TRAJ:-}
+MAST3R_ODOM_TOPIC=${MAST3R_ODOM_TOPIC:-}
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -43,6 +45,14 @@ while [[ $# -gt 0 ]]; do
         --no-calib)
             USE_CALIB=false
             shift
+            ;;
+        --odom-traj)
+            MAST3R_ODOM_TRAJ="$2"
+            shift 2
+            ;;
+        --odom-topic)
+            MAST3R_ODOM_TOPIC="$2"
+            shift 2
             ;;
         --rosbridge)
             USE_ROSBRIDGE=true
@@ -70,11 +80,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--viz | --no-viz] [--use-calib | --no-calib] [--rosbridge | --no-rosbridge]"
+            echo "Usage: $0 [--viz | --no-viz] [--use-calib | --no-calib] [--odom-traj PATH | --odom-topic TOPIC] [--rosbridge | --no-rosbridge]"
             exit 1
             ;;
     esac
 done
+
+if [ -n "$MAST3R_ODOM_TRAJ" ] && [ -n "$MAST3R_ODOM_TOPIC" ]; then
+    echo "Error: use either --odom-traj or --odom-topic, not both"
+    exit 1
+fi
 
 if [ ! -d "/workspace/thor/MASt3R-SLAM" ]; then
     echo "Error: Must be run inside the mast3r-slam container"
@@ -119,6 +134,8 @@ echo "  CameraInfo topic: $MAST3R_CAMERA_INFO_TOPIC"
 echo "  Device: $MAST3R_DEVICE"
 echo "  Max FPS: $MAST3R_MAX_FPS"
 echo "  Camera calibration: $(if [ "$USE_CALIB" = "true" ]; then echo ENABLED; else echo DISABLED; fi)"
+echo "  Odom trajectory: ${MAST3R_ODOM_TRAJ:-<disabled>}"
+echo "  Live odom topic: ${MAST3R_ODOM_TOPIC:-<disabled>}"
 echo "  Robot transport: $(if [ "$USE_ROSBRIDGE" = "true" ]; then echo "rosbridge $ROSBRIDGE_HOST:$ROSBRIDGE_PORT"; else echo "native DDS"; fi)"
 echo "  Remote TF topics: $ROSBRIDGE_TF_TOPIC, $ROSBRIDGE_TF_STATIC_TOPIC"
 echo "  Local TF topics: $LOCAL_TF_TOPIC, $LOCAL_TF_STATIC_TOPIC"
@@ -155,6 +172,13 @@ ROS_ARGS=(
     -r "/tf:=$LOCAL_TF_TOPIC"
     -r "/tf_static:=$LOCAL_TF_STATIC_TOPIC"
 )
+
+if [ -n "$MAST3R_ODOM_TRAJ" ]; then
+    ROS_ARGS+=(-p "odom_traj:=$MAST3R_ODOM_TRAJ")
+fi
+if [ -n "$MAST3R_ODOM_TOPIC" ]; then
+    ROS_ARGS+=(-p "odom_topic:=$MAST3R_ODOM_TOPIC")
+fi
 
 if [ "$MAST3R_USE_COMPRESSED" != "auto" ]; then
     ROS_ARGS+=(-p "use_compressed:=$MAST3R_USE_COMPRESSED")

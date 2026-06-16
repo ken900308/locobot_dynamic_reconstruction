@@ -28,6 +28,8 @@ MAST3R_KEYFRAME_LOCAL_CLOUD_TOPIC=${MAST3R_KEYFRAME_LOCAL_CLOUD_TOPIC:-/${ROBOT_
 MAST3R_KEYFRAME_IMAGE_TOPIC=${MAST3R_KEYFRAME_IMAGE_TOPIC:-/${ROBOT_ID}/mast3r/keyframe_image}
 USE_ROSBRIDGE=${USE_ROSBRIDGE:-true}
 USE_CALIB=${USE_CALIB:-true}
+MAST3R_ODOM_TRAJ=${MAST3R_ODOM_TRAJ:-}
+MAST3R_ODOM_TOPIC=${MAST3R_ODOM_TOPIC:-/locobot/odom}
 
 FORWARD_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -64,6 +66,14 @@ while [[ $# -gt 0 ]]; do
             USE_CALIB=false
             shift
             ;;
+        --odom-traj)
+            MAST3R_ODOM_TRAJ="$2"
+            shift 2
+            ;;
+        --odom-topic)
+            MAST3R_ODOM_TOPIC="$2"
+            shift 2
+            ;;
         --dds|--no-rosbridge)
             USE_ROSBRIDGE=false
             FORWARD_ARGS+=(--no-rosbridge)
@@ -98,6 +108,13 @@ export MAST3R_MAX_FPS
 export MAST3R_USE_COMPRESSED
 export USE_ROSBRIDGE
 export USE_CALIB
+if [ -n "$MAST3R_ODOM_TRAJ" ] && [ -n "$MAST3R_ODOM_TOPIC" ]; then
+    echo "Error: use either --odom-traj or --odom-topic, not both"
+    exit 1
+fi
+
+export MAST3R_ODOM_TRAJ
+export MAST3R_ODOM_TOPIC
 export ROSBRIDGE_HOST="$ROBOT_ROSBRIDGE_HOST"
 export ROSBRIDGE_PORT="$ROBOT_ROSBRIDGE_PORT"
 export ROSBRIDGE_TF_TOPIC="$ROBOT_TF_TOPIC"
@@ -117,6 +134,12 @@ if [ "$USE_CALIB" = "true" ]; then
 else
     MAST3R_CONFIG="config/eval_no_calib.yaml"
     FORWARD_ARGS+=(--no-calib)
+fi
+if [ -n "$MAST3R_ODOM_TRAJ" ]; then
+    FORWARD_ARGS+=(--odom-traj "$MAST3R_ODOM_TRAJ")
+fi
+if [ -n "$MAST3R_ODOM_TOPIC" ]; then
+    FORWARD_ARGS+=(--odom-topic "$MAST3R_ODOM_TOPIC")
 fi
 
 echo "Starting MASt3R-SLAM as a direct ROS node..."
@@ -138,6 +161,8 @@ echo "  MAST3R_KEYFRAME_IMAGE_TOPIC: $MAST3R_KEYFRAME_IMAGE_TOPIC"
 echo "  USE_ROSBRIDGE: $USE_ROSBRIDGE"
 echo "  ROSBRIDGE: $ROSBRIDGE_HOST:$ROSBRIDGE_PORT"
 echo "  USE_CALIB: $USE_CALIB"
+echo "  MAST3R_ODOM_TRAJ: ${MAST3R_ODOM_TRAJ:-<disabled>}"
+echo "  MAST3R_ODOM_TOPIC: ${MAST3R_ODOM_TOPIC:-<disabled>}"
 echo "  Local outputs: $MAST3R_FRAME_POINTCLOUD_TOPIC, $MAST3R_FULLMAP_POINTCLOUD_TOPIC, and $MAST3R_FULLMAP_RAW_POINTCLOUD_TOPIC"
 
 exec /workspace/thor/MASt3R-SLAM/launch_mast3r_visual_ros2_igbr.sh "${FORWARD_ARGS[@]}"
