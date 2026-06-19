@@ -34,6 +34,9 @@ class CompressedImageBandwidthTestNode(Node):
         self.declare_parameter("rosbridge_port", 9090)
         self.declare_parameter("rosbridge_connect_timeout_sec", 5.0)
         self.declare_parameter("log_path", "")
+        self.declare_parameter("republish_fusion", True)
+        self.declare_parameter("fusion_republish_topic", "/local/fusion/image_raw/compressed")
+        self.declare_parameter("fusion_republish_queue_size", 10)
 
         self._raw_topics = self._get_string_array_parameter("raw_topics")
         self._fusion_topic = self.get_parameter("fusion_topic").value
@@ -46,6 +49,13 @@ class CompressedImageBandwidthTestNode(Node):
             self.get_parameter("rosbridge_connect_timeout_sec").value
         )
         self._log_path = str(self.get_parameter("log_path").value).strip()
+        self._republish_fusion = bool(self.get_parameter("republish_fusion").value)
+        self._fusion_republish_topic = str(
+            self.get_parameter("fusion_republish_topic").value
+        ).strip()
+        self._fusion_republish_queue_size = int(
+            self.get_parameter("fusion_republish_queue_size").value
+        )
 
         if not self._raw_topics:
             raise ValueError("raw_topics must contain at least one topic")
@@ -55,6 +65,10 @@ class CompressedImageBandwidthTestNode(Node):
             raise ValueError("report_period_sec must be greater than 0")
         if self._rosbridge_connect_timeout_sec <= 0.0:
             raise ValueError("rosbridge_connect_timeout_sec must be greater than 0")
+        if self._republish_fusion and not self._fusion_republish_topic:
+            raise ValueError("fusion_republish_topic must not be empty when republish_fusion=true")
+        if self._fusion_republish_queue_size <= 0:
+            raise ValueError("fusion_republish_queue_size must be greater than 0")
 
         all_topics = [*self._raw_topics, self._fusion_topic]
         self._tracker = BandwidthTracker(all_topics, self._window_sec)
@@ -63,6 +77,13 @@ class CompressedImageBandwidthTestNode(Node):
         self._rosbridge_client = None
         self._rosbridge_listeners = []
         self._log_file = None
+        self._fusion_publisher = None
+        if self._republish_fusion:
+            self._fusion_publisher = self.create_publisher(
+                CompressedImage,
+                self._fusion_republish_topic,
+                self._fusion_republish_queue_size,
+            )
         self._open_log_file()
 
         if self._use_rosbridge:
@@ -80,6 +101,11 @@ class CompressedImageBandwidthTestNode(Node):
         )
         if self._log_path:
             self.get_logger().info(f"Writing bandwidth txt log to: {self._log_path}")
+        if self._republish_fusion:
+            self.get_logger().info(
+                f"Republishing fusion topic locally: {self._fusion_topic} -> "
+                f"{self._fusion_republish_topic}"
+            )
 
     def _open_log_file(self) -> None:
         if not self._log_path:
@@ -154,6 +180,8 @@ class CompressedImageBandwidthTestNode(Node):
     def _make_ros_callback(self, topic: str):
         def callback(msg: CompressedImage) -> None:
             self._record_payload(topic, len(msg.data))
+            if topic == self._fusion_topic:
+                self._publish_fusion_msg(msg)
 
         return callback
 
@@ -161,15 +189,39 @@ class CompressedImageBandwidthTestNode(Node):
         def callback(msg) -> None:
             data_base64 = msg.get("data", "")
             try:
-                payload_bytes = len(base64.b64decode(data_base64))
+                image_data = base64.b64decode(data_base64)
             except Exception as exc:
                 self.get_logger().warning(
                     f"Failed to decode rosbridge CompressedImage data from {topic}: {exc}"
                 )
                 return
-            self._record_payload(topic, payload_bytes)
+
+            self._record_payload(topic, len(image_data))
+            if topic == self._fusion_topic:
+                self._publish_fusion_msg(
+                    self._compressed_image_from_rosbridge(msg, image_data)
+                )
 
         return callback
+
+    def _compressed_image_from_rosbridge(self, msg, image_data: bytes) -> CompressedImage:
+        ros_msg = CompressedImage()
+        header = msg.get("header", {})
+        stamp = header.get("stamp", {}) if isinstance(header, dict) else {}
+        if isinstance(stamp, dict):
+            ros_msg.header.stamp.sec = int(stamp.get("sec", 0))
+            ros_msg.header.stamp.nanosec = int(
+                stamp.get("nanosec", stamp.get("nsecs", 0))
+            )
+        ros_msg.header.frame_id = str(header.get("frame_id", "")) if isinstance(header, dict) else ""
+        ros_msg.format = str(msg.get("format", "jpeg"))
+        ros_msg.data = image_data
+        return ros_msg
+
+    def _publish_fusion_msg(self, msg: CompressedImage) -> None:
+        if self._fusion_publisher is None:
+            return
+        self._fusion_publisher.publish(msg)
 
     def _record_payload(self, topic: str, payload_bytes: int) -> None:
         now_sec = self.get_clock().now().nanoseconds / 1e9
