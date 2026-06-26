@@ -97,6 +97,7 @@ packages = [
     ("Pillow", "PIL"),
     ("einops", "einops"),
     ("torch", "torch"),
+    ("lietorch", "lietorch"),
     ("imgui", "imgui"),
     ("in3d", "in3d"),
 ]

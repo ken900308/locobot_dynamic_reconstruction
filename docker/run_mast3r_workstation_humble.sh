@@ -91,7 +91,7 @@ docker exec -it "$CONTAINER_NAME" env FORCE_SETUP="${FORCE_SETUP:-0}" bash -lc "
   cd /workspace/thor/MASt3R-SLAM
 
   echo '>>> Upgrading packaging tools'
-  python -m pip install -U pip 'setuptools==70.0.0' 'packaging>=24.1' 'wheel>=0.43' ninja
+  python -m pip install -U pip 'setuptools==70.0.0' 'packaging>=24.1' 'wheel>=0.43' ninja backports.tarfile
 
   echo '>>> Ensuring PyTorch 2.7.1+cu128 for RTX 50-series'
   if ! python - <<'PY'
@@ -129,6 +129,11 @@ PY
   python -m pip install --no-build-isolation --no-deps -e thirdparty/in3d
   echo '>>> Installing faiss-cpu'
   python -m pip install --no-cache-dir 'faiss-cpu==1.7.4' || python -m pip install --no-cache-dir faiss-cpu
+
+  echo '>>> Installing lietorch without touching PyTorch'
+  TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-12.0}" FORCE_CUDA=1 \
+    python -m pip install --no-build-isolation --no-deps \
+    'lietorch @ git+https://github.com/princeton-vl/lietorch.git'
 
   echo '>>> Installing project itself'
   echo '>>> Ensuring known-good numpy/opencv pins from workstation build'

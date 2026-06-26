@@ -8,7 +8,7 @@ import torch
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-has_cuda = torch.cuda.is_available()
+has_cuda = os.environ.get("FORCE_CUDA", "0") == "1" or torch.cuda.is_available()
 
 include_dirs = [
     os.path.join(ROOT, "mast3r_slam/backend/include"),

@@ -118,7 +118,7 @@ RUN set -eux; \
     python3 --version; \
     nvcc --version || true
 
-RUN python3 -m pip install --upgrade pip 'setuptools==70.0.0' 'packaging>=24.1' 'wheel>=0.43' ninja
+RUN python3 -m pip install --upgrade pip 'setuptools==70.0.0' 'packaging>=24.1' 'wheel>=0.43' ninja backports.tarfile
 
 RUN printf '%s\n' \
     'torch==2.7.1' \
@@ -167,6 +167,10 @@ RUN python3 -m pip install --no-cache-dir 'faiss-cpu==1.7.4' || \
     python3 -m pip install --no-cache-dir faiss-cpu || true
 
 RUN python3 -m pip install --no-cache-dir pyrealsense2 || echo "WARNING: pyrealsense2 not available, skipping..."
+
+RUN TORCH_CUDA_ARCH_LIST="${TARGET_CUDA_ARCH}" FORCE_CUDA=1 \
+    python3 -m pip install --no-build-isolation --no-deps --no-cache-dir \
+    'lietorch @ git+https://github.com/princeton-vl/lietorch.git'
 
 WORKDIR /workspace
 COPY thor/MASt3R-SLAM /workspace/thor/MASt3R-SLAM
