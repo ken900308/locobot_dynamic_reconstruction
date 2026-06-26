@@ -3,7 +3,7 @@ set -euo pipefail
 
 source_ros_setup() {
     set +u
-    source /opt/ros/jazzy/setup.bash
+    source /opt/ros/humble/setup.bash
     if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then
         source /workspace/thor/ros2_ws/install/setup.bash
     fi

@@ -2,7 +2,7 @@
 set -eo pipefail
 
 set +u
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/humble/setup.bash
 set -u
 if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then
     set +u

@@ -5,7 +5,7 @@ set -euo pipefail
 # - WebSocket port: 9091
 # - Relaxed transport: max_message_size=100000000
 
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/humble/setup.bash
 if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then
     source /workspace/thor/ros2_ws/install/setup.bash
 fi

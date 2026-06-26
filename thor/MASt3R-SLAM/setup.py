@@ -1,7 +1,8 @@
 import os
 from setuptools import setup
 
-os.environ["TORCH_CUDA_ARCH_LIST"] = "11.0"
+cuda_arch = os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "12.0")
+cuda_arch_code = cuda_arch.replace(".", "")
 
 import torch
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
@@ -29,7 +30,7 @@ if has_cuda:
     sources.append("mast3r_slam/backend/src/matching_kernels.cu")
     extra_compile_args["nvcc"] = [
         "-O3",
-        "-gencode=arch=compute_110,code=sm_110",
+        f"-gencode=arch=compute_{cuda_arch_code},code=sm_{cuda_arch_code}",
     ]
 
     ext_modules = [
@@ -55,4 +56,3 @@ setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension},
 )
-

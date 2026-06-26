@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "Starting Milestone 1A Multi-Robot Fusion Node..."
 set +u
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/humble/setup.bash
 set -u
 if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then
     set +u

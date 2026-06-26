@@ -96,9 +96,9 @@ if [ ! -d "/workspace/thor/MASt3R-SLAM" ]; then
     exit 1
 fi
 
-if [ -f /opt/ros/jazzy/setup.bash ]; then
+if [ -f /opt/ros/humble/setup.bash ]; then
     set +u
-    source /opt/ros/jazzy/setup.bash
+    source /opt/ros/humble/setup.bash
     set -u
 fi
 if [ -f /workspace/thor/ros2_ws/install/setup.bash ]; then

@@ -123,7 +123,7 @@ cd /workspace/MASt3R-SLAM
 
 # Setup ROS2 environment  
 echo "🔧 Setting up ROS2 environment..."
-source /opt/ros/jazzy/setup.bash
+source /opt/ros/humble/setup.bash
 
 # # Clean up any remaining processes and CUDA memory
 # echo "🧹 Cleaning up previous processes..."

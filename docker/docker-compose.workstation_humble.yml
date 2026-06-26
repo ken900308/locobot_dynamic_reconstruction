@@ -1,4 +1,4 @@
-name: locobot_jazzy
+name: locobot_humble
 
 #############################
 ###    shared settings    ###
@@ -6,8 +6,8 @@ name: locobot_jazzy
 x-common-settings: &common
   build:
     context: ..
-    dockerfile: docker/dockerfile.arm_jazzy
-  image: mast3r-slam:arm64-thor-locobot
+    dockerfile: docker/dockerfile.workstation_humble
+  image: mast3r-slam:workstation-humble
 
   volumes:
     # GUI support
@@ -68,8 +68,8 @@ x-gpu-settings: &gpu
 ###   Container Services   ###
 ##############################
 services:
-  mast3r_locobot_jazzy:
+  mast3r_locobot_humble:
     <<: [ *common, *gpu ]
-    container_name: mast3r_locobot_jazzy
+    container_name: mast3r_locobot_humble
     shm_size: "16g"
     command: [ "/bin/bash" ]
