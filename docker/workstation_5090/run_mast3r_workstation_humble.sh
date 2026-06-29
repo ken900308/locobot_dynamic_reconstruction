@@ -5,7 +5,8 @@ set -euo pipefail
 # Uses an NVIDIA CUDA Ubuntu 22.04 base image with ROS 2 Humble.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/.."
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_DIR"
 
 # Default parameters
 DATASET_DEFAULT="datasets/tum/rgbd_dataset_freiburg1_desk"
@@ -17,7 +18,7 @@ EXTRA_ARGS="${3:-}"
 IMAGE_NAME="mast3r-slam:workstation-humble"
 LEGACY_IMAGE_NAME="mast3r-slam:workstation-stretch3-humble"
 CONTAINER_NAME="mast3r_locobot_humble"
-COMPOSE_FILE="docker/docker-compose.workstation_humble.yml"
+COMPOSE_FILE="$SCRIPT_DIR/docker-compose.workstation_humble.yml"
 
 # Set this to 1 after changing the Dockerfile and wanting a rebuild.
 # Keep it at 0 to reuse the existing image for faster startup.

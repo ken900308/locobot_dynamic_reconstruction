@@ -5,8 +5,8 @@ name: locobot_humble
 #############################
 x-common-settings: &common
   build:
-    context: ..
-    dockerfile: docker/dockerfile.workstation_humble
+    context: ../..
+    dockerfile: docker/workstation_5090/dockerfile.workstation_humble
   image: mast3r-slam:workstation-humble
 
   volumes:
@@ -16,7 +16,7 @@ x-common-settings: &common
     - /etc/localtime:/etc/localtime:ro
 
     # Mount entire project directory
-    - ..:/workspace:rw
+    - ../..:/workspace:rw
 
     # udev rules for RealSense
     - /etc/udev/rules.d:/etc/udev/rules.d:ro
