@@ -11,5 +11,18 @@ thor/ros2_ws/src/stretch3_ros_nodes/stretch3_ros_nodes/__pycache__/*
 
 thor/quick_start/__pycache__/
 thor/quick_start/logs/
-thor/quick_start/launch_1345_gui.py
+thor/quick_start/legacy/launch_1345_gui.py
+
+# Generated Python, ROS, reconstruction, and recording artifacts
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+*.log
+thor/MASt3R-SLAM/logs/
+thor/MASt3R-SLAM/checkpoints/
+thor/quick_start/build/
+thor/quick_start/install/
+thor/quick_start/log/
+thor/rosbag*/
+rosbag*/
 

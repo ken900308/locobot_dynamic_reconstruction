@@ -1,156 +1,68 @@
-# MASt3R-SLAM x Locobot Jazzy
+# LoCoBot MASt3R-SLAM Client
 
-This repo runs the LoCoBot side of the MASt3R-SLAM reconstruction pipeline on the NVIDIA AGX Thor. The current pipeline is ROS-based and uses quick_start scripts `2`, `4`, and `5`.
+LoCoBot 端目前只負責執行自己的 MASt3R-SLAM，公開入口只有
+`thor/quick_start/2_mast3r_slam.sh`。
 
-The old IPC path is still present in the tree for reference, but it is not the active workflow.
+Multi-robot backend、geometric verification、PGO、optimized map 與 ROS-TCP
+transfer 全部由 `stretch3_jazzy` 端啟動；不要在 LoCoBot 端重複啟動。
 
-## Current Pipeline
+## 啟動
 
-```text
-LoCoBot robot ROS graph
-  image / camera_info / tf relay
-        |
-        | rosbridge
-        v
-Thor MASt3R container
-  quick_start/2_mast3r_slam.sh
-        |
-        +--> /robot1/mast3r/frame_pointcloud
-        +--> /robot1/mast3r/pointcloud_in_map
+在 LoCoBot 的 Thor／MASt3R container 內執行：
 
-  quick_start/4_auto_anchor.sh
-        |
-        +--> locobot/odom -> robot1/mast3r_map
-
-  quick_start/5_pc2_to_map.sh
-        |
-        +--> /robot1/mast3r/pointcloud_in_map
+```bash
+cd /workspace/thor/quick_start
+./2_mast3r_slam.sh
 ```
 
-## Robot Identity
-
-LoCoBot is treated as `robot1`.
-
-Default local Thor topics:
+目前腳本預設值：
 
 ```text
-/robot1/tf
-/robot1/tf_static
-/robot1/mast3r/frame_pointcloud
-/robot1/mast3r/pointcloud_in_map
-```
-
-Default TF frames:
-
-```text
-WORLD_FRAME=locobot/odom
-CAMERA_FRAME=locobot/camera_color_optical_frame
-MAST3R_FRAME=robot1/mast3r_map
-```
-
-The robot-side tf relay is expected to provide non-conflicting frame names before data reaches Thor.
-
-## Rosbridge Inputs
-
-`quick_start/2_mast3r_slam.sh` subscribes to the robot-side ROS graph through rosbridge.
-
-Default robot-facing inputs:
-
-```text
-ROBOT_ROSBRIDGE_HOST=192.168.0.213
-ROBOT_ROSBRIDGE_PORT=9090
+ROBOT_ID=robot1
+ROBOT_ROSBRIDGE_HOST=192.168.0.150
+ROBOT_ROSBRIDGE_PORT=9091
 ROBOT_IMAGE_TOPIC=/locobot/camera/camera/color/image_raw/compressed
 ROBOT_CAMERA_INFO_TOPIC=/locobot/camera/camera/color/camera_info
 ROBOT_TF_TOPIC=/tf
 ROBOT_TF_STATIC_TOPIC=/locobot/tf_static_relay
+MAST3R_ODOM_TOPIC=/locobot/odom
 ```
 
-`ROBOT_TF_STATIC_TOPIC` is the remote rosbridge source topic. The MASt3R node republishes that TF locally with ROS remapping:
+實際部署時可用環境變數或 command-line 參數覆寫。完整說明請看
+[`thor/quick_start/README.md`](thor/quick_start/README.md)。
+
+## LoCoBot 輸出
 
 ```text
-/tf        -> /robot1/tf
-/tf_static -> /robot1/tf_static
-```
-
-This keeps robot1 TF isolated from robot2 when both pipelines run in the same ROS domain.
-
-## Start Order
-
-Run these inside the Thor container/workspace that has this repo mounted at `/workspace/thor`.
-
-### Terminal 1: MASt3R-SLAM
-
-```bash
-cd /workspace/thor/quick_start
-source 2_mast3r_slam.sh
-```
-
-Useful overrides:
-
-```bash
-source 2_mast3r_slam.sh --ip 192.168.0.213 --no-viz
-source 2_mast3r_slam.sh --dds
-source 2_mast3r_slam.sh --use-calib
-```
-
-### Terminal 2: Auto Anchor
-
-```bash
-cd /workspace/thor/quick_start
-source 4_auto_anchor.sh
-```
-
-This waits for `/robot1/mast3r/frame_pointcloud`, looks up:
-
-```text
-locobot/odom -> locobot/camera_color_optical_frame
-```
-
-and publishes:
-
-```text
-locobot/odom -> robot1/mast3r_map
-```
-
-through `/robot1/tf_static`.
-
-### Terminal 3: PointCloud To Map
-
-```bash
-cd /workspace/thor/quick_start
-source 5_pc2_to_map.sh
-```
-
-This subscribes to:
-
-```text
-/robot1/mast3r/frame_pointcloud
 /robot1/tf
 /robot1/tf_static
-```
-
-and publishes:
-
-```text
+/robot1/mast3r/frame_pointcloud
 /robot1/mast3r/pointcloud_in_map
+/robot1/mast3r/pointcloud_in_mast3r_map
+/robot1/mast3r/keyframe_metadata
+/robot1/mast3r/keyframe_cloud_local
+/robot1/mast3r/keyframe_image
 ```
 
-## Multi-Robot Notes
+Stretch 端的 8/9/10 與 transfer 流程會訂閱其中需要的 robot1 topics。
 
-When LoCoBot and Stretch3 run in the same ROS domain:
+## 目錄
 
 ```text
-robot1 outputs:
-  /robot1/mast3r/frame_pointcloud
-  /robot1/mast3r/pointcloud_in_map
-  /robot1/tf
-  /robot1/tf_static
-
-robot2 outputs:
-  /robot2/mast3r/frame_pointcloud
-  /robot2/mast3r/pointcloud_in_map
-  /robot2/tf
-  /robot2/tf_static
+locobot_jazzy/
+├── docs/                       # 封存文件
+└── thor/
+    ├── MASt3R-SLAM/            # 現行 LoCoBot SLAM 實作
+    │   └── legacy/             # 舊 entrypoints/evaluation/backups
+    └── quick_start/
+        ├── 2_mast3r_slam.sh    # 唯一公開入口
+        └── legacy/             # LoCoBot 不再啟動的舊流程
 ```
 
-The local topic namespace separates transport. The TF frame prefixes from the robot-side relay separate frame names.
+Build、install、log、checkpoint、rosbag 與 cache 是本機產物，不屬於 active
+原始碼分類。
+
+## 舊文件
+
+原本描述 2/4/5 流程的 README 已移到
+`docs/legacy_pipeline_README.md`，只供歷史追溯。
